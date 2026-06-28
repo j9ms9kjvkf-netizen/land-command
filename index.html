@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Land Command</title>
+  <style>
+    html, body, #root { height: 100%; margin: 0; }
+    body { background: #F3F4EE; font-family: system-ui, sans-serif; }
+    #lc-error {
+      display: none; position: fixed; inset: 0; z-index: 99999;
+      background: #18241D; color: #FF5A1F; padding: 24px;
+      font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;
+      white-space: pre-wrap; overflow: auto;
+    }
+    #lc-boot {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #6B7569; font-size: 14px; font-family: system-ui, sans-serif;
+    }
+  </style>
+
+  <!-- React + ReactDOM (UMD globals) and Babel for in-browser JSX transform -->
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.25.6/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="lc-boot">Loading Land Command…</div>
+  <pre id="lc-error"></pre>
+
+  <script>
+    // Minimal persistence shim — the app falls back to in-memory if this is absent,
+    // but backing it with localStorage makes buy boxes / leads / saved parcels survive reloads.
+    window.storage = {
+      get: async (key) => ({ value: localStorage.getItem(key) }),
+      set: async (key, value) => { localStorage.setItem(key, value); },
+    };
+
+    function showError(msg) {
+      const el = document.getElementById('lc-error');
+      el.textContent = 'Land Command failed to load:\n\n' + msg;
+      el.style.display = 'block';
+      const boot = document.getElementById('lc-boot');
+      if (boot) boot.style.display = 'none';
+    }
+    window.addEventListener('error', (e) => showError(e.message + '\n' + (e.error && e.error.stack || '')));
+
+    (async () => {
+      try {
+        const res = await fetch('./land-command_5.jsx');
+        if (!res.ok) throw new Error('Could not fetch land-command_5.jsx (HTTP ' + res.status + ')');
+        let src = await res.text();
+
+        // Rewrite the ESM React import to use the global UMD React, and drop the default export.
+        src = src.replace(/import\s+React[^;]*;/, 'const { useState, useEffect, useMemo } = React;');
+        src = src.replace(/export\s+default\s+function\s+LandCommand/, 'function LandCommand');
+
+        const { code } = Babel.transform(src, { presets: ['react'], filename: 'land-command_5.jsx' });
+
+        // Execute the transformed module in a function scope and hand back the component.
+        const LandCommand = new Function('React', code + '\nreturn LandCommand;')(React);
+
+        const boot = document.getElementById('lc-boot');
+        if (boot) boot.remove();
+        ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(LandCommand));
+      } catch (err) {
+        showError((err && err.stack) || String(err));
+      }
+    })();
+  </script>
+</body>
+</html>
