@@ -1415,7 +1415,7 @@ const SCRIPTS = {
 };
 
 function titleScript(lead, settings, box) {
-  const me = settings.myName || "[your name]";
+  const me = settings.myName || "Deivan";
   const co = settings.myCompany || "our company";
   const closeDays = (box && box.closeDays) || "30";
   return { title: "Title & Escrow — opening call", body:
@@ -1502,7 +1502,23 @@ function BuyerMatch({ lead, data }) {
 
 // Renders ONE call script exactly as the attached file — steps, say/tip blocks, questions,
 // rebuttals, and the "before you hang up" capture list. Step + checkboxes persist on the lead.
-function ScriptRunner({ script, step, onStep, checks, onToggle }) {
+// Auto-fill the script's [PLACEHOLDERS] with live lead data + the caller's name (Deivan by default).
+function fillScript(text, lead, settings, side) {
+  if (!text || typeof text !== "string") return text;
+  const me = (settings && settings.myName) || "Deivan";
+  const phone = (settings && settings.myPhone) || "[PHONE]";
+  const owner = side === "builder" ? (lead.buybox || "[OWNER NAME]") : (lead.owner || "[OWNER NAME]");
+  const nm = side === "builder" ? (lead.buybox || "[NAME]") : (lead.owner || "[NAME]");
+  const area = lead.address || (lead.county ? `${lead.county} County` : null);
+  const county = lead.county ? `${lead.county} County` : null;
+  let t = text.replace(/\[YOUR NAME\]/g, me).replace(/\[PHONE\]/g, phone).replace(/\[OWNER NAME\]/g, owner).replace(/\[NAME\]/g, nm);
+  if (area) t = t.replace(/\[ROAD \/ PARCEL AREA\]/g, area).replace(/\[ROAD \/ GENERAL AREA\]/g, area).replace(/\[ROAD \/ AREA\]/g, area);
+  if (county) t = t.replace(/\[GENERAL AREA\]/g, county).replace(/\[AREA\/MARKET\]/g, county).replace(/\[MARKET\]/g, county);
+  return t;
+}
+
+function ScriptRunner({ script, step, onStep, checks, onToggle, fill }) {
+  const F = fill || ((x) => x);
   const i = Math.max(0, Math.min(script.steps.length - 1, step));
   const s = script.steps[i];
   return (
@@ -1523,13 +1539,13 @@ function ScriptRunner({ script, step, onStep, checks, onToggle }) {
         <span style={{ fontSize: 24 }}>{s.icon}</span>
         <div style={{ fontSize: 17, fontWeight: 700, color: "#f1f5f9" }}>{s.label}</div>
       </div>
-      <div style={{ background: "#161d2e", borderLeft: `3px solid ${script.accent}`, borderRadius: "0 8px 8px 0", padding: "12px 16px", fontSize: 13, color: "#94a3b8", marginBottom: 24, lineHeight: 1.65 }}>{s.intro}</div>
+      <div style={{ background: "#161d2e", borderLeft: `3px solid ${script.accent}`, borderRadius: "0 8px 8px 0", padding: "12px 16px", fontSize: 13, color: "#94a3b8", marginBottom: 24, lineHeight: 1.65 }}>{F(s.intro)}</div>
       {s.blocks && s.blocks.length > 0 && (
         <div style={{ marginBottom: 28 }}>
           {s.blocks.map((b, bi) => (
             <div key={bi} style={{ background: b.bg, border: `1px solid ${b.color}33`, borderRadius: 10, padding: "14px 18px", marginBottom: 12, lineHeight: 1.75 }}>
               <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: b.color, marginBottom: 8, textTransform: "uppercase" }}>{b.type === "say" ? "🎙" : b.type === "tip" ? "💡" : "🔵"} {b.label}</div>
-              <div style={{ fontSize: 14, color: "#e2e8f0" }}>{b.text}</div>
+              <div style={{ fontSize: 14, color: "#e2e8f0" }}>{F(b.text)}</div>
             </div>
           ))}
         </div>
@@ -1557,8 +1573,8 @@ function ScriptRunner({ script, step, onStep, checks, onToggle }) {
           <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 14 }}>Rebuttals</div>
           {s.rebuttals.map((r, ri) => (
             <div key={ri} style={{ background: "#13101a", border: "1px solid #2d1f3a", borderRadius: 10, padding: "14px 18px", marginBottom: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", marginBottom: 8 }}>THEM: {r.them}</div>
-              <div style={{ fontSize: 14, color: "#fde68a", lineHeight: 1.7 }}><span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 11 }}>YOU: </span>{r.you}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", marginBottom: 8 }}>THEM: {F(r.them)}</div>
+              <div style={{ fontSize: 14, color: "#fde68a", lineHeight: 1.7 }}><span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 11 }}>YOU: </span>{F(r.you)}</div>
             </div>
           ))}
         </div>
@@ -1656,7 +1672,7 @@ function DealFlow({ lead, data, update, onClose }) {
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px 56px" }}>
         <div style={{ maxWidth: 760, margin: "0 auto" }}>
-          {P.script && <ScriptRunner script={SCRIPTS[P.script]} step={steps[P.script] || 0} onStep={(i) => setStep(P.script, i)} checks={checks} onToggle={toggle} />}
+          {P.script && <ScriptRunner script={SCRIPTS[P.script]} step={steps[P.script] || 0} onStep={(i) => setStep(P.script, i)} checks={checks} onToggle={toggle} fill={(t) => fillScript(t, lead, settings, P.script)} />}
           {P.tool === "comps" && <FunnelComps lead={lead} />}
           {P.tool === "contract" && (<><ContractSend lead={lead} data={data} update={update} /><PhaseChecklist phase={P} checks={checks} toggle={toggle} /></>)}
           {P.tool === "close" && (<><FunnelScriptDark {...titleScript(lead, settings, box)} /><PhaseChecklist phase={P} checks={checks} toggle={toggle} /></>)}
@@ -1732,7 +1748,7 @@ export default function LandCommand() {
         </div>
       </div>
       {/* Body */}
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: isMobile ? (tab === "gis" ? "0" : "12px 10px 36px") : "22px 20px 60px" }}>
+      <div style={{ maxWidth: tab === "gis" ? "100%" : 1100, margin: "0 auto", padding: tab === "gis" ? "0" : (isMobile ? "12px 10px 36px" : "22px 20px 60px") }}>
         {!loaded ? <div style={{ color: C.faint, fontSize: 14 }}>Loading your saved buy boxes and leads…</div> : (
           <>
             {tab === "boxes" && <BuyBoxesTab data={data} update={update} />}
@@ -3106,7 +3122,7 @@ function GISTab({ data, update, onStartDeal }) {
   const cardOpen = !!selected;
 
   return (
-    <div style={{ position: "relative", height: isMobile ? "calc(100dvh - 84px)" : "calc(100vh - 140px)", minHeight: isMobile ? 360 : 520, background: T.bg, borderRadius: isMobile ? 0 : 12, overflow: "hidden", border: isMobile ? "none" : `1px solid ${T.border}`, fontFamily: "'Inter',system-ui,-apple-system,sans-serif" }}>
+    <div style={{ position: "relative", height: isMobile ? "calc(100dvh - 84px)" : "calc(100vh - 118px)", minHeight: isMobile ? 360 : 520, background: T.bg, borderRadius: 0, overflow: "hidden", border: "none", fontFamily: "'Inter',system-ui,-apple-system,sans-serif" }}>
       <style>{`
         .gm .leaflet-pane{z-index:1}.gm .leaflet-overlay-pane{z-index:4}.gm .leaflet-marker-pane{z-index:6}
         .gcb{backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:opacity .15s}
@@ -3141,7 +3157,7 @@ function GISTab({ data, update, onStartDeal }) {
       )}
 
       {/* Top bar — state pills (row 1) + county dropdown (row 2) */}
-      <div style={{ position: "absolute", top: 12, left: 12, right: isMobile ? 98 : 168, zIndex: 700, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+      <div style={{ position: "absolute", top: 12, left: 12, right: 58, zIndex: 700, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
         {/* Search — jump to any street address or parcel APN */}
         <div style={{ display: "flex", gap: 6, width: isMobile ? "100%" : "min(330px, 64vw)" }}>
           <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
@@ -3166,13 +3182,8 @@ function GISTab({ data, update, onStartDeal }) {
         </div>
       </div>
 
-      {/* Saved-parcels basket */}
-      <button className="gcb" onClick={() => { setBasketOpen(o => !o); setSettingsOpen(false); }} title="Saved parcels" style={{ position: "absolute", top: 12, right: isMobile ? 12 : 58, zIndex: 701, height: 38, padding: "0 13px", borderRadius: 19, border: `1px solid ${T.ctrlBorder}`, background: saved.length ? T.accent : T.ctrl, color: saved.length ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", gap: 6 }}>
-        ★ {saved.length}
-      </button>
-
       {/* Data-source / proxy settings */}
-      <button className="gcb" onClick={() => { setSettingsOpen(o => !o); setBasketOpen(false); }} title="Live data source (CORS proxy)" style={{ position: "absolute", top: 12, right: isMobile ? 50 : 120, zIndex: 701, width: 38, height: 38, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: (data.settings && data.settings.gisProxy) ? T.accent : T.ctrl, color: (data.settings && data.settings.gisProxy) ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <button className="gcb" onClick={() => { setSettingsOpen(o => !o); setBasketOpen(false); }} title="Live data source (CORS proxy)" style={{ position: "absolute", top: 12, right: 12, zIndex: 701, width: 38, height: 38, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: (data.settings && data.settings.gisProxy) ? T.accent : T.ctrl, color: (data.settings && data.settings.gisProxy) ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
         ⚙
       </button>
 
@@ -3240,6 +3251,11 @@ function GISTab({ data, update, onStartDeal }) {
 
       {/* Right controls */}
       <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 700, display: "flex", flexDirection: "column", gap: 6 }}>
+        {/* Saved-parcels basket — sits at the top of the rail, just above the compass */}
+        <button className="gcb" onClick={() => { setBasketOpen(o => !o); setSettingsOpen(false); }} title="Saved parcels" style={{ position: "relative", width: isMobile ? 36 : 40, height: isMobile ? 36 : 40, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: saved.length ? T.accent : T.ctrl, color: saved.length ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          ★
+          {saved.length > 0 && <span style={{ position: "absolute", top: -3, right: -3, minWidth: 16, height: 16, padding: "0 3px", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${T.bg}` }}>{saved.length}</span>}
+        </button>
         {[
           ["🧭", resetNorth, "Reset north"],
           ["↺", () => rotate(-15), "Rotate left"],
