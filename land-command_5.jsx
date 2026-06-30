@@ -2558,11 +2558,13 @@ async function arcgisQuery(serviceUrl, params, { signal, timeout = 9000, proxy =
     const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, timeout, proxy });
     return res.json();
   };
+  // GeoJSON first. If the service returns a features array (even an empty one), it speaks
+  // GeoJSON — return immediately. Only retry as Esri JSON when GeoJSON is unsupported
+  // (error object or thrown). This avoids a wasteful second query on every empty viewport.
   try {
     const j = await run("geojson");
-    if (j && Array.isArray(j.features) && j.features.length) return j.features;   // service supports geojson
-    if (!j || !j.error) { /* empty or non-geojson response — retry as Esri JSON below */ }
-  } catch (_) { /* fall through to Esri JSON */ }
+    if (j && Array.isArray(j.features)) return j.features;
+  } catch (e) { if (signal && signal.aborted) throw e; }
   try {
     const j = await run("json");
     return esriToGeoJSON(j && j.features);
@@ -2613,14 +2615,17 @@ function nearestCounty(st, lat, lng) {
   return best;
 }
 
-// Query every parcel intersecting the current map bounds (for showing all lot outlines)
+// Query every parcel intersecting the current map bounds (for showing all lot outlines).
+// maxAllowableOffset generalizes geometry server-side (~3m) so payloads are small and the
+// canvas renders fast; we only need outlines, not survey-grade vertices. outFields is trimmed
+// to the few the lot click/card actually reads — full attributes are fetched on single-parcel click.
 async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = "") {
   return arcgisQuery(serviceUrl, {
     geometry: `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`,
     geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
     outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
-    resultRecordCount: "2000",
-  }, { signal, timeout: 22000, proxy });
+    resultRecordCount: "1000", maxAllowableOffset: "0.00003", geometryPrecision: "6",
+  }, { signal, timeout: 14000, proxy });
 }
 
 const STATE_ABBR = { "Florida": "FL", "Texas": "TX", "Tennessee": "TN", "North Carolina": "NC", "Virginia": "VA", "Puerto Rico": "PR", "New York": "NY", "Montana": "MT", "Massachusetts": "MA", "Vermont": "VT", "Connecticut": "CT" };
@@ -2934,7 +2939,7 @@ function GISTab({ data, update, onStartDeal }) {
   const [searchQ, setSearchQ] = React.useState("");
   const [searching, setSearching] = React.useState(false);
 
-  const PARCEL_ZOOM = 13;   // show lot outlines at this zoom and deeper (lower = lines visible from further out)
+  const PARCEL_ZOOM = 15;   // show lot outlines at this zoom and deeper (15 keeps the data volume light & the map fast)
   const T = GT[theme];
   const isMobile = useIsMobile();
   const saved = data.gisSaved || [];
