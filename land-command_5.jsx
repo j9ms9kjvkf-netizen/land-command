@@ -1698,6 +1698,7 @@ function useIsMobile() {
 
 export default function LandCommand() {
   const [tab, setTab] = useState("gis");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [data, setData] = useState({ buyboxes: [], leads: [] });
   const [loaded, setLoaded] = useState(false);
   const [activeDeal, setActiveDeal] = useState(null);
@@ -1723,27 +1724,49 @@ export default function LandCommand() {
       {/* Header */}
       <div style={{ background: C.ink, padding: isMobile ? "9px 12px 0" : "16px 20px 0" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, paddingBottom: isMobile ? 9 : 16 }}>
             <span className="lc-display" style={{ fontSize: isMobile ? 20 : 30, fontWeight: 800, color: "#fff", letterSpacing: ".06em", textTransform: "uppercase" }}>
               Land<span style={{ color: C.orange }}>Command</span>
             </span>
             {!isMobile && <span className="lc-mono" style={{ fontSize: 11.5, color: "#9DAB9F" }}>buy box → sourcing → score → outreach</span>}
-            <span className="lc-mono" style={{ marginLeft: "auto", fontSize: 11, color: "#9DAB9F", whiteSpace: "nowrap" }}>
-              {data.buyboxes.length} {isMobile ? "bb" : "buy box" + (data.buyboxes.length === 1 ? "" : "es")} · {data.leads.length} lead{data.leads.length === 1 ? "" : "s"}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: isMobile ? 3 : 6, marginTop: isMobile ? 8 : 14, flexWrap: isMobile ? "nowrap" : "wrap", overflowX: isMobile ? "auto" : "visible", WebkitOverflowScrolling: "touch" }}>
-            {TABS.map(([id, label]) => (
-              <button key={id} type="button" onClick={() => setTab(id)} className="lc-flagtab lc-display"
-                style={{
-                  padding: isMobile ? "7px 15px 7px 11px" : "9px 26px 9px 16px", border: "none", cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap",
-                  fontWeight: 800, fontSize: isMobile ? 12 : 14.5, letterSpacing: ".05em", textTransform: "uppercase",
-                  background: tab === id ? C.paper : "#26352C", color: tab === id ? C.ink : "#B9C4BB",
-                  borderRadius: "6px 0 0 0",
-                }}>
-                {label}
-              </button>
-            ))}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: isMobile ? 8 : 14 }}>
+              {!isMobile && <span className="lc-mono" style={{ fontSize: 11, color: "#9DAB9F", whiteSpace: "nowrap" }}>
+                {data.buyboxes.length} buy box{data.buyboxes.length === 1 ? "" : "es"} · {data.leads.length} lead{data.leads.length === 1 ? "" : "s"}
+              </span>}
+              {/* Navigation — single dropdown (top-right) replaces the old tab strip */}
+              <div style={{ position: "relative" }}>
+                <button type="button" onClick={() => setMenuOpen(o => !o)} className="lc-display"
+                  style={{
+                    display: "flex", alignItems: "center", gap: isMobile ? 6 : 9, cursor: "pointer",
+                    padding: isMobile ? "7px 12px" : "9px 16px", border: `1px solid ${C.orange}`, borderRadius: 9,
+                    background: menuOpen ? C.orange : "#26352C", color: menuOpen ? C.ink : "#fff",
+                    fontWeight: 800, fontSize: isMobile ? 12 : 14, letterSpacing: ".05em", textTransform: "uppercase", whiteSpace: "nowrap",
+                  }}>
+                  <span style={{ fontSize: isMobile ? 13 : 15, lineHeight: 1 }}>☰</span>
+                  {(TABS.find(([id]) => id === tab) || [, "Menu"])[1]}
+                  <span style={{ fontSize: 10, opacity: 0.8, transform: menuOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▼</span>
+                </button>
+                {menuOpen && (
+                  <>
+                    <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 5000 }} />
+                    <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 5001, minWidth: 210,
+                      background: C.ink, border: `1px solid ${C.orange}`, borderRadius: 10, padding: 6,
+                      boxShadow: "0 12px 32px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", gap: 2 }}>
+                      {TABS.map(([id, label]) => (
+                        <button key={id} type="button" onClick={() => { setTab(id); setMenuOpen(false); }} className="lc-display"
+                          style={{
+                            textAlign: "left", padding: "10px 14px", border: "none", borderRadius: 7, cursor: "pointer",
+                            fontWeight: 800, fontSize: 13.5, letterSpacing: ".05em", textTransform: "uppercase",
+                            background: tab === id ? C.orange : "transparent", color: tab === id ? C.ink : "#D4DDD6",
+                          }}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2191,7 +2214,14 @@ const GIS_COUNTIES_MORE = {
   WI: {"Adams":{lat:43.9738,lng:-89.7672,slug:"adams"},"Ashland":{lat:46.5444,lng:-90.6797,slug:"ashland"},"Barron":{lat:45.4372,lng:-91.8529,slug:"barron"},"Bayfield":{lat:46.6342,lng:-91.1773,slug:"bayfield"},"Brown":{lat:44.474,lng:-87.9961,slug:"brown"},"Buffalo":{lat:44.3856,lng:-91.7613,slug:"buffalo"},"Burnett":{lat:45.8669,lng:-92.3757,slug:"burnett"},"Calumet":{lat:44.0784,lng:-88.2121,slug:"calumet"},"Chippewa":{lat:45.0691,lng:-91.2835,slug:"chippewa"},"Clark":{lat:44.7393,lng:-90.61,slug:"clark"},"Columbia":{lat:43.4719,lng:-89.3305,slug:"columbia"},"Crawford":{lat:43.2428,lng:-90.9352,slug:"crawford"},"Dane":{lat:43.0675,lng:-89.4179,slug:"dane"},"Dodge":{lat:43.4296,lng:-88.7019,slug:"dodge"},"Door":{lat:45.0934,lng:-87.0487,slug:"door"},"Douglas":{lat:46.4632,lng:-91.8925,slug:"douglas"},"Dunn":{lat:44.9478,lng:-91.8976,slug:"dunn"},"Eau Claire":{lat:44.7264,lng:-91.2864,slug:"eauclaire"},"Florence":{lat:45.8718,lng:-88.407,slug:"florence"},"Fond du Lac":{lat:43.7547,lng:-88.4933,slug:"fonddulac"},"Forest":{lat:45.6669,lng:-88.7733,slug:"forest"},"Grant":{lat:42.87,lng:-90.6942,slug:"grant"},"Green":{lat:42.6755,lng:-89.6051,slug:"green"},"Green Lake":{lat:43.7802,lng:-88.9704,slug:"greenlake"},"Iowa":{lat:43.001,lng:-90.1337,slug:"iowa"},"Iron":{lat:46.3265,lng:-90.2613,slug:"iron"},"Jackson":{lat:44.3246,lng:-90.7995,slug:"jackson"},"Jefferson":{lat:43.0138,lng:-88.774,slug:"jefferson"},"Juneau":{lat:43.9328,lng:-90.114,slug:"juneau"},"Kenosha":{lat:42.5875,lng:-87.88,slug:"kenosha"},"Kewaunee":{lat:44.6057,lng:-87.448,slug:"kewaunee"},"La Crosse":{lat:43.9082,lng:-91.1118,slug:"lacrosse"},"Lafayette":{lat:42.6556,lng:-90.1303,slug:"lafayette"},"Langlade":{lat:45.2549,lng:-89.0671,slug:"langlade"},"Lincoln":{lat:45.3331,lng:-89.7322,slug:"lincoln"},"Manitowoc":{lat:44.1561,lng:-87.5774,slug:"manitowoc"},"Marathon":{lat:44.898,lng:-89.7578,slug:"marathon"},"Marinette":{lat:45.3469,lng:-87.9912,slug:"marinette"},"Marquette":{lat:43.8261,lng:-89.4091,slug:"marquette"},"Menominee":{lat:44.9913,lng:-88.6693,slug:"menominee"},"Milwaukee":{lat:42.9126,lng:-87.8623,slug:"milwaukee"},"Monroe":{lat:43.9452,lng:-90.62,slug:"monroe"},"Oconto":{lat:44.9966,lng:-88.2065,slug:"oconto"},"Oneida":{lat:45.7162,lng:-89.5345,slug:"oneida"},"Outagamie":{lat:44.4182,lng:-88.465,slug:"outagamie"},"Ozaukee":{lat:43.5018,lng:-87.8476,slug:"ozaukee"},"Pepin":{lat:44.6274,lng:-91.8349,slug:"pepin"},"Pierce":{lat:44.7253,lng:-92.4263,slug:"pierce"},"Polk":{lat:45.462,lng:-92.4471,slug:"polk"},"Portage":{lat:44.4762,lng:-89.4981,slug:"portage"},"Price":{lat:45.6791,lng:-90.3597,slug:"price"},"Racine":{lat:42.7804,lng:-87.7716,slug:"racine"},"Richland":{lat:43.3762,lng:-90.4357,slug:"richland"},"Rock":{lat:42.6699,lng:-89.0753,slug:"rock"},"Rusk":{lat:45.4727,lng:-91.1367,slug:"rusk"},"Sauk":{lat:43.428,lng:-89.9433,slug:"sauk"},"Sawyer":{lat:45.865,lng:-91.1471,slug:"sawyer"},"Shawano":{lat:44.7896,lng:-88.7558,slug:"shawano"},"Sheboygan":{lat:43.7387,lng:-87.7315,slug:"sheboygan"},"St. Croix":{lat:45.029,lng:-92.4473,slug:"stcroix"},"Taylor":{lat:45.2117,lng:-90.5049,slug:"taylor"},"Trempealeau":{lat:44.303,lng:-91.3589,slug:"trempealeau"},"Vernon":{lat:43.5994,lng:-90.822,slug:"vernon"},"Vilas":{lat:46.0498,lng:-89.5013,slug:"vilas"},"Walworth":{lat:42.6681,lng:-88.5417,slug:"walworth"},"Washburn":{lat:45.8925,lng:-91.7964,slug:"washburn"},"Washington":{lat:43.3912,lng:-88.2329,slug:"washington"},"Waukesha":{lat:43.0184,lng:-88.3042,slug:"waukesha"},"Waupaca":{lat:44.478,lng:-88.967,slug:"waupaca"},"Waushara":{lat:44.1128,lng:-89.2398,slug:"waushara"},"Winnebago":{lat:44.0857,lng:-88.6681,slug:"winnebago"},"Wood":{lat:44.4614,lng:-90.0388,slug:"wood"}},
   MN: {"Aitkin":{lat:46.6024,lng:-93.4197,slug:"aitkin"},"Anoka":{lat:45.2741,lng:-93.2427,slug:"anoka"},"Becker":{lat:46.9376,lng:-95.7418,slug:"becker"},"Beltrami":{lat:47.8795,lng:-95.005,slug:"beltrami"},"Benton":{lat:45.7012,lng:-94.0014,slug:"benton"},"Big Stone":{lat:45.4199,lng:-96.4022,slug:"bigstone"},"Blue Earth":{lat:44.0337,lng:-94.064,slug:"blueearth"},"Brown":{lat:44.2465,lng:-94.7336,slug:"brown"},"Carlton":{lat:46.6038,lng:-92.671,slug:"carlton"},"Carver":{lat:44.8213,lng:-93.8001,slug:"carver"},"Cass":{lat:46.9517,lng:-94.3337,slug:"cass"},"Chippewa":{lat:45.0286,lng:-95.5641,slug:"chippewa"},"Chisago":{lat:45.5054,lng:-92.9038,slug:"chisago"},"Clay":{lat:46.8984,lng:-96.4949,slug:"clay"},"Clearwater":{lat:47.5759,lng:-95.3711,slug:"clearwater"},"Cook":{lat:47.7586,lng:-90.3443,slug:"cook"},"Cottonwood":{lat:44.0106,lng:-95.1832,slug:"cottonwood"},"Crow Wing":{lat:46.4917,lng:-94.0707,slug:"crowwing"},"Dakota":{lat:44.6709,lng:-93.0625,slug:"dakota"},"Dodge":{lat:44.0207,lng:-92.8694,slug:"dodge"},"Douglas":{lat:45.9368,lng:-95.4622,slug:"douglas"},"Faribault":{lat:43.6765,lng:-93.9472,slug:"faribault"},"Fillmore":{lat:43.6792,lng:-92.0939,slug:"fillmore"},"Freeborn":{lat:43.6742,lng:-93.3503,slug:"freeborn"},"Goodhue":{lat:44.4062,lng:-92.716,slug:"goodhue"},"Grant":{lat:45.9307,lng:-96.0107,slug:"grant"},"Hennepin":{lat:45.0061,lng:-93.4752,slug:"hennepin"},"Houston":{lat:43.667,lng:-91.5016,slug:"houston"},"Hubbard":{lat:47.0956,lng:-94.9133,slug:"hubbard"},"Isanti":{lat:45.5624,lng:-93.2963,slug:"isanti"},"Itasca":{lat:47.4908,lng:-93.6111,slug:"itasca"},"Jackson":{lat:43.6711,lng:-95.1497,slug:"jackson"},"Kanabec":{lat:45.9478,lng:-93.2978,slug:"kanabec"},"Kandiyohi":{lat:45.1527,lng:-95.005,slug:"kandiyohi"},"Kittson":{lat:48.776,lng:-96.7803,slug:"kittson"},"Koochiching":{lat:48.2454,lng:-93.7829,slug:"koochiching"},"Lac qui Parle":{lat:44.9998,lng:-96.1769,slug:"lacquiparle"},"Lake":{lat:47.5171,lng:-91.4117,slug:"lake"},"Lake of the Woods":{lat:48.7681,lng:-94.9046,slug:"lakeofthewoods"},"Le Sueur":{lat:44.3734,lng:-93.7301,slug:"lesueur"},"Lincoln":{lat:44.4082,lng:-96.272,slug:"lincoln"},"Lyon":{lat:44.4092,lng:-95.8473,slug:"lyon"},"Mahnomen":{lat:47.3284,lng:-95.8111,slug:"mahnomen"},"Marshall":{lat:48.3627,lng:-96.3578,slug:"marshall"},"Martin":{lat:43.6772,lng:-94.5471,slug:"martin"},"McLeod":{lat:44.8217,lng:-94.2723,slug:"mcleod"},"Meeker":{lat:45.1232,lng:-94.5273,slug:"meeker"},"Mille Lacs":{lat:45.929,lng:-93.633,slug:"millelacs"},"Morrison":{lat:46.0205,lng:-94.2666,slug:"morrison"},"Mower":{lat:43.6662,lng:-92.7595,slug:"mower"},"Murray":{lat:44.0156,lng:-95.7616,slug:"murray"},"Nicollet":{lat:44.3588,lng:-94.2457,slug:"nicollet"},"Nobles":{lat:43.6777,lng:-95.7631,slug:"nobles"},"Norman":{lat:47.3295,lng:-96.4638,slug:"norman"},"Olmsted":{lat:43.9995,lng:-92.4101,slug:"olmsted"},"Otter Tail":{lat:46.4057,lng:-95.7146,slug:"ottertail"},"Pennington":{lat:48.0692,lng:-96.0377,slug:"pennington"},"Pine":{lat:46.1009,lng:-92.7631,slug:"pine"},"Pipestone":{lat:44.0154,lng:-96.257,slug:"pipestone"},"Polk":{lat:47.7743,lng:-96.4,slug:"polk"},"Pope":{lat:45.5896,lng:-95.4467,slug:"pope"},"Ramsey":{lat:45.0152,lng:-93.1,slug:"ramsey"},"Red Lake":{lat:47.8655,lng:-96.0872,slug:"redlake"},"Redwood":{lat:44.4035,lng:-95.2542,slug:"redwood"},"Renville":{lat:44.7237,lng:-94.9556,slug:"renville"},"Rice":{lat:44.3508,lng:-93.2985,slug:"rice"},"Rock":{lat:43.6696,lng:-96.2632,slug:"rock"},"Roseau":{lat:48.7611,lng:-95.8215,slug:"roseau"},"Scott":{lat:44.6518,lng:-93.5337,slug:"scott"},"Sherburne":{lat:45.4532,lng:-93.7692,slug:"sherburne"},"Sibley":{lat:44.5757,lng:-94.2301,slug:"sibley"},"St. Louis":{lat:47.5786,lng:-92.5146,slug:"stlouis"},"Stearns":{lat:45.5552,lng:-94.6105,slug:"stearns"},"Steele":{lat:44.0153,lng:-93.2205,slug:"steele"},"Stevens":{lat:45.5935,lng:-95.9923,slug:"stevens"},"Swift":{lat:45.2758,lng:-95.6901,slug:"swift"},"Todd":{lat:46.0666,lng:-94.9006,slug:"todd"},"Traverse":{lat:45.7699,lng:-96.4748,slug:"traverse"},"Wabasha":{lat:44.2896,lng:-92.2335,slug:"wabasha"},"Wadena":{lat:46.587,lng:-94.9886,slug:"wadena"},"Waseca":{lat:44.0185,lng:-93.5898,slug:"waseca"},"Washington":{lat:45.0379,lng:-92.8901,slug:"washington"},"Watonwan":{lat:43.9781,lng:-94.6138,slug:"watonwan"},"Wilkin":{lat:46.3623,lng:-96.4767,slug:"wilkin"},"Winona":{lat:43.9814,lng:-91.777,slug:"winona"},"Wright":{lat:45.1751,lng:-93.9664,slug:"wright"},"Yellow Medicine":{lat:44.7157,lng:-95.8628,slug:"yellowmedicine"}},
   AR: {"Arkansas":{lat:34.2896,lng:-91.3765,slug:"arkansas"},"Ashley":{lat:33.1908,lng:-91.7723,slug:"ashley"},"Baxter":{lat:36.2803,lng:-92.3299,slug:"baxter"},"Benton":{lat:36.3378,lng:-94.2563,slug:"benton"},"Boone":{lat:36.3043,lng:-93.0792,slug:"boone"},"Bradley":{lat:33.4665,lng:-92.1692,slug:"bradley"},"Calhoun":{lat:33.5605,lng:-92.5139,slug:"calhoun"},"Carroll":{lat:36.3374,lng:-93.541,slug:"carroll"},"Chicot":{lat:33.2671,lng:-91.2972,slug:"chicot"},"Clark":{lat:34.0533,lng:-93.1762,slug:"clark"},"Clay":{lat:36.3673,lng:-90.4187,slug:"clay"},"Cleburne":{lat:35.5936,lng:-92.0089,slug:"cleburne"},"Cleveland":{lat:33.8932,lng:-92.1887,slug:"cleveland"},"Columbia":{lat:33.223,lng:-93.2328,slug:"columbia"},"Conway":{lat:35.2657,lng:-92.6892,slug:"conway"},"Craighead":{lat:35.8277,lng:-90.6314,slug:"craighead"},"Crawford":{lat:35.583,lng:-94.2362,slug:"crawford"},"Crittenden":{lat:35.1976,lng:-90.3051,slug:"crittenden"},"Cross":{lat:35.2857,lng:-90.764,slug:"cross"},"Dallas":{lat:33.9678,lng:-92.654,slug:"dallas"},"Desha":{lat:33.8288,lng:-91.2441,slug:"desha"},"Drew":{lat:33.5872,lng:-91.7228,slug:"drew"},"Faulkner":{lat:35.1465,lng:-92.3369,slug:"faulkner"},"Franklin":{lat:35.5086,lng:-93.8877,slug:"franklin"},"Fulton":{lat:36.3813,lng:-91.8193,slug:"fulton"},"Garland":{lat:34.5789,lng:-93.1469,slug:"garland"},"Grant":{lat:34.2856,lng:-92.423,slug:"grant"},"Greene":{lat:36.1206,lng:-90.5663,slug:"greene"},"Hempstead":{lat:33.736,lng:-93.6644,slug:"hempstead"},"Hot Spring":{lat:34.3152,lng:-92.9441,slug:"hotspring"},"Howard":{lat:34.0831,lng:-93.9909,slug:"howard"},"Independence":{lat:35.7375,lng:-91.5599,slug:"independence"},"Izard":{lat:36.0949,lng:-91.9136,slug:"izard"},"Jackson":{lat:35.5965,lng:-91.2232,slug:"jackson"},"Jefferson":{lat:34.2772,lng:-91.9297,slug:"jefferson"},"Johnson":{lat:35.5734,lng:-93.4663,slug:"johnson"},"Lafayette":{lat:33.2406,lng:-93.6115,slug:"lafayette"},"Lawrence":{lat:36.0411,lng:-91.1012,slug:"lawrence"},"Lee":{lat:34.7795,lng:-90.7797,slug:"lee"},"Lincoln":{lat:33.9564,lng:-91.7424,slug:"lincoln"},"Little River":{lat:33.7019,lng:-94.2363,slug:"littleriver"},"Logan":{lat:35.2187,lng:-93.7209,slug:"logan"},"Lonoke":{lat:34.7551,lng:-91.8941,slug:"lonoke"},"Madison":{lat:36.0125,lng:-93.7241,slug:"madison"},"Marion":{lat:36.2667,lng:-92.6786,slug:"marion"},"Miller":{lat:33.3055,lng:-93.9015,slug:"miller"},"Mississippi":{lat:35.7669,lng:-90.0522,slug:"mississippi"},"Monroe":{lat:34.6795,lng:-91.2033,slug:"monroe"},"Montgomery":{lat:34.5457,lng:-93.6642,slug:"montgomery"},"Nevada":{lat:33.6667,lng:-93.3051,slug:"nevada"},"Newton":{lat:35.9107,lng:-93.2159,slug:"newton"},"Ouachita":{lat:33.5912,lng:-92.8784,slug:"ouachita"},"Perry":{lat:34.9464,lng:-92.9269,slug:"perry"},"Phillips":{lat:34.4237,lng:-90.8556,slug:"phillips"},"Pike":{lat:34.1582,lng:-93.6587,slug:"pike"},"Poinsett":{lat:35.5689,lng:-90.6811,slug:"poinsett"},"Polk":{lat:34.491,lng:-94.2309,slug:"polk"},"Pope":{lat:35.4566,lng:-93.0268,slug:"pope"},"Prairie":{lat:34.8311,lng:-91.5536,slug:"prairie"},"Pulaski":{lat:34.7703,lng:-92.313,slug:"pulaski"},"Randolph":{lat:36.3413,lng:-91.0284,slug:"randolph"},"Saline":{lat:34.6485,lng:-92.6745,slug:"saline"},"Scott":{lat:34.8589,lng:-94.0636,slug:"scott"},"Searcy":{lat:35.8964,lng:-92.6959,slug:"searcy"},"Sebastian":{lat:35.197,lng:-94.275,slug:"sebastian"},"Sevier":{lat:33.9949,lng:-94.2433,slug:"sevier"},"Sharp":{lat:36.1734,lng:-91.4711,slug:"sharp"},"St. Francis":{lat:35.0228,lng:-90.7515,slug:"stfrancis"},"Stone":{lat:35.857,lng:-92.1405,slug:"stone"},"Union":{lat:33.1682,lng:-92.5981,slug:"union"},"Van Buren":{lat:35.583,lng:-92.516,slug:"vanburen"},"Washington":{lat:35.978,lng:-94.2173,slug:"washington"},"White":{lat:35.2551,lng:-91.753,slug:"white"},"Woodruff":{lat:35.1928,lng:-91.2445,slug:"woodruff"},"Yell":{lat:34.9977,lng:-93.4083,slug:"yell"}},
-  NM: {"Bernalillo":{lat:35.0536,lng:-106.6691,slug:"bernalillo"},"Catron":{lat:33.9016,lng:-108.3919,slug:"catron"},"Chaves":{lat:33.3616,lng:-104.4698,slug:"chaves"},"Cibola":{lat:34.9283,lng:-107.9927,slug:"cibola"},"Colfax":{lat:36.613,lng:-104.6401,slug:"colfax"},"Curry":{lat:34.573,lng:-103.3461,slug:"curry"},"De Baca":{lat:34.3593,lng:-104.3687,slug:"debaca"},"DoÃ±a Ana":{lat:32.3499,lng:-106.835,slug:"doã±aana"},"Eddy":{lat:32.4578,lng:-104.3064,slug:"eddy"},"Grant":{lat:32.7321,lng:-108.3815,slug:"grant"},"Guadalupe":{lat:34.8698,lng:-104.785,slug:"guadalupe"},"Harding":{lat:35.8594,lng:-103.8534,slug:"harding"},"Hidalgo":{lat:31.8981,lng:-108.7519,slug:"hidalgo"},"Lea":{lat:32.7957,lng:-103.4133,slug:"lea"},"Lincoln":{lat:33.7408,lng:-105.4498,slug:"lincoln"},"Los Alamos":{lat:35.87,lng:-106.308,slug:"losalamos"},"Luna":{lat:32.1845,lng:-107.7472,slug:"luna"},"McKinley":{lat:35.5841,lng:-108.2533,slug:"mckinley"},"Mora":{lat:35.9828,lng:-104.9219,slug:"mora"},"Otero":{lat:32.6156,lng:-105.7513,slug:"otero"},"Quay":{lat:35.107,lng:-103.5481,slug:"quay"},"Rio Arriba":{lat:36.5097,lng:-106.694,slug:"rioarriba"},"Roosevelt":{lat:34.0212,lng:-103.483,slug:"roosevelt"},"San Juan":{lat:36.5116,lng:-108.3246,slug:"sanjuan"},"San Miguel":{lat:35.4769,lng:-104.8035,slug:"sanmiguel"},"Sandoval":{lat:35.6851,lng:-106.8831,slug:"sandoval"},"Santa Fe":{lat:35.5145,lng:-105.964,slug:"santafe"},"Sierra":{lat:33.1195,lng:-107.1882,slug:"sierra"},"Socorro":{lat:33.9917,lng:-106.9391,slug:"socorro"},"Taos":{lat:36.5772,lng:-105.6389,slug:"taos"},"Torrance":{lat:34.555,lng:-105.8906,slug:"torrance"},"Union":{lat:36.4881,lng:-103.4757,slug:"union"},"Valencia":{lat:34.7168,lng:-106.8066,slug:"valencia"}}
+  NM: {"Bernalillo":{lat:35.0536,lng:-106.6691,slug:"bernalillo"},"Catron":{lat:33.9016,lng:-108.3919,slug:"catron"},"Chaves":{lat:33.3616,lng:-104.4698,slug:"chaves"},"Cibola":{lat:34.9283,lng:-107.9927,slug:"cibola"},"Colfax":{lat:36.613,lng:-104.6401,slug:"colfax"},"Curry":{lat:34.573,lng:-103.3461,slug:"curry"},"De Baca":{lat:34.3593,lng:-104.3687,slug:"debaca"},"DoÃ±a Ana":{lat:32.3499,lng:-106.835,slug:"doã±aana"},"Eddy":{lat:32.4578,lng:-104.3064,slug:"eddy"},"Grant":{lat:32.7321,lng:-108.3815,slug:"grant"},"Guadalupe":{lat:34.8698,lng:-104.785,slug:"guadalupe"},"Harding":{lat:35.8594,lng:-103.8534,slug:"harding"},"Hidalgo":{lat:31.8981,lng:-108.7519,slug:"hidalgo"},"Lea":{lat:32.7957,lng:-103.4133,slug:"lea"},"Lincoln":{lat:33.7408,lng:-105.4498,slug:"lincoln"},"Los Alamos":{lat:35.87,lng:-106.308,slug:"losalamos"},"Luna":{lat:32.1845,lng:-107.7472,slug:"luna"},"McKinley":{lat:35.5841,lng:-108.2533,slug:"mckinley"},"Mora":{lat:35.9828,lng:-104.9219,slug:"mora"},"Otero":{lat:32.6156,lng:-105.7513,slug:"otero"},"Quay":{lat:35.107,lng:-103.5481,slug:"quay"},"Rio Arriba":{lat:36.5097,lng:-106.694,slug:"rioarriba"},"Roosevelt":{lat:34.0212,lng:-103.483,slug:"roosevelt"},"San Juan":{lat:36.5116,lng:-108.3246,slug:"sanjuan"},"San Miguel":{lat:35.4769,lng:-104.8035,slug:"sanmiguel"},"Sandoval":{lat:35.6851,lng:-106.8831,slug:"sandoval"},"Santa Fe":{lat:35.5145,lng:-105.964,slug:"santafe"},"Sierra":{lat:33.1195,lng:-107.1882,slug:"sierra"},"Socorro":{lat:33.9917,lng:-106.9391,slug:"socorro"},"Taos":{lat:36.5772,lng:-105.6389,slug:"taos"},"Torrance":{lat:34.555,lng:-105.8906,slug:"torrance"},"Union":{lat:36.4881,lng:-103.4757,slug:"union"},"Valencia":{lat:34.7168,lng:-106.8066,slug:"valencia"}},
+  VA: {"Accomack":{lat:37.7643,lng:-75.6362,slug:"accomack"},"Albemarle":{lat:38.0245,lng:-78.5531,slug:"albemarle"},"Alexandria":{lat:38.8221,lng:-77.0578,slug:"alexandria"},"Alleghany":{lat:37.786,lng:-80.0116,slug:"alleghany"},"Amelia":{lat:37.3412,lng:-77.9849,slug:"amelia"},"Amherst":{lat:37.6035,lng:-79.1443,slug:"amherst"},"Appomattox":{lat:37.3742,lng:-78.8114,slug:"appomattox"},"Arlington":{lat:38.8785,lng:-77.1002,slug:"arlington"},"Augusta":{lat:38.1613,lng:-79.1245,slug:"augusta"},"Bath":{lat:38.0607,lng:-79.7397,slug:"bath"},"Bedford":{lat:37.336,lng:-79.5174,slug:"bedford"},"Bland":{lat:37.1309,lng:-81.1318,slug:"bland"},"Botetourt":{lat:37.5563,lng:-79.8128,slug:"botetourt"},"Bristol":{lat:36.6097,lng:-82.1677,slug:"bristol"},"Brunswick":{lat:36.7644,lng:-77.86,slug:"brunswick"},"Buchanan":{lat:37.2654,lng:-82.042,slug:"buchanan"},"Buckingham":{lat:37.5779,lng:-78.5249,slug:"buckingham"},"Buena Vista":{lat:37.7319,lng:-79.3579,slug:"buenavista"},"Campbell":{lat:37.2042,lng:-79.098,slug:"campbell"},"Caroline":{lat:38.0312,lng:-77.3443,slug:"caroline"},"Carroll":{lat:36.7318,lng:-80.7351,slug:"carroll"},"Charles City":{lat:37.3538,lng:-77.0653,slug:"charlescity"},"Charlotte":{lat:37.017,lng:-78.6621,slug:"charlotte"},"Charlottesville":{lat:38.0381,lng:-78.4838,slug:"charlottesville"},"Chesapeake":{lat:36.6771,lng:-76.3051,slug:"chesapeake"},"Chesterfield":{lat:37.3776,lng:-77.5858,slug:"chesterfield"},"Clarke":{lat:39.1117,lng:-78.0008,slug:"clarke"},"Colonial Heights":{lat:37.2612,lng:-77.3984,slug:"colonialheights"},"Covington":{lat:37.7784,lng:-79.9865,slug:"covington"},"Craig":{lat:37.4812,lng:-80.2111,slug:"craig"},"Culpeper":{lat:38.4812,lng:-77.9557,slug:"culpeper"},"Cumberland":{lat:37.509,lng:-78.2416,slug:"cumberland"},"Danville":{lat:36.5814,lng:-79.3956,slug:"danville"},"Dickenson":{lat:37.1235,lng:-82.3521,slug:"dickenson"},"Dinwiddie":{lat:37.0798,lng:-77.6349,slug:"dinwiddie"},"Emporia":{lat:36.6974,lng:-77.534,slug:"emporia"},"Essex":{lat:37.9409,lng:-76.9516,slug:"essex"},"Fairfax":{lat:38.8329,lng:-77.2733,slug:"fairfax"},"Falls Church":{lat:38.8844,lng:-77.175,slug:"fallschurch"},"Fauquier":{lat:38.736,lng:-77.812,slug:"fauquier"},"Floyd":{lat:36.9276,lng:-80.3661,slug:"floyd"},"Fluvanna":{lat:37.8418,lng:-78.2754,slug:"fluvanna"},"Franklin":{lat:36.6826,lng:-76.939,slug:"franklin"},"Frederick":{lat:39.2039,lng:-78.2631,slug:"frederick"},"Fredericksburg":{lat:38.2989,lng:-77.4867,slug:"fredericksburg"},"Galax":{lat:36.6666,lng:-80.9171,slug:"galax"},"Giles":{lat:37.3107,lng:-80.7085,slug:"giles"},"Gloucester":{lat:37.4153,lng:-76.5352,slug:"gloucester"},"Goochland":{lat:37.7198,lng:-77.9132,slug:"goochland"},"Grayson":{lat:36.6567,lng:-81.2303,slug:"grayson"},"Greene":{lat:38.2961,lng:-78.4588,slug:"greene"},"Greensville":{lat:36.6789,lng:-77.5543,slug:"greensville"},"Halifax":{lat:36.7644,lng:-78.9375,slug:"halifax"},"Hampton":{lat:37.0511,lng:-76.3691,slug:"hampton"},"Hanover":{lat:37.7656,lng:-77.4994,slug:"hanover"},"Harrisonburg":{lat:38.4372,lng:-78.871,slug:"harrisonburg"},"Henrico":{lat:37.5467,lng:-77.412,slug:"henrico"},"Henry":{lat:36.682,lng:-79.8754,slug:"henry"},"Highland":{lat:38.3593,lng:-79.5681,slug:"highland"},"Hopewell":{lat:37.2948,lng:-77.3093,slug:"hopewell"},"Isle of Wight":{lat:36.8919,lng:-76.7252,slug:"isleofwight"},"James City":{lat:37.3256,lng:-76.7813,slug:"jamescity"},"King George":{lat:38.2763,lng:-77.1371,slug:"kinggeorge"},"King William":{lat:37.7107,lng:-77.0981,slug:"kingwilliam"},"King and Queen":{lat:37.7103,lng:-76.8838,slug:"kingandqueen"},"Lancaster":{lat:37.7299,lng:-76.4618,slug:"lancaster"},"Lee":{lat:36.7074,lng:-83.1249,slug:"lee"},"Lexington":{lat:37.7821,lng:-79.4449,slug:"lexington"},"Loudoun":{lat:39.0881,lng:-77.6377,slug:"loudoun"},"Louisa":{lat:37.9773,lng:-77.9621,slug:"louisa"},"Lunenburg":{lat:36.9473,lng:-78.2386,slug:"lunenburg"},"Lynchburg":{lat:37.3997,lng:-79.192,slug:"lynchburg"},"Madison":{lat:38.4149,lng:-78.2759,slug:"madison"},"Manassas":{lat:38.7493,lng:-77.4837,slug:"manassas"},"Manassas Park":{lat:38.7715,lng:-77.4441,slug:"manassaspark"},"Martinsville":{lat:36.6821,lng:-79.8629,slug:"martinsville"},"Mathews":{lat:37.4348,lng:-76.3336,slug:"mathews"},"Mecklenburg":{lat:36.6796,lng:-78.364,slug:"mecklenburg"},"Middlesex":{lat:37.6276,lng:-76.5605,slug:"middlesex"},"Montgomery":{lat:37.1716,lng:-80.3882,slug:"montgomery"},"Nelson":{lat:37.7888,lng:-78.8871,slug:"nelson"},"New Kent":{lat:37.5078,lng:-76.9931,slug:"newkent"},"Newport News":{lat:37.12,lng:-76.5302,slug:"newportnews"},"Norfolk":{lat:36.8973,lng:-76.2636,slug:"norfolk"},"Northampton":{lat:37.3436,lng:-75.876,slug:"northampton"},"Northumberland":{lat:37.8812,lng:-76.4119,slug:"northumberland"},"Norton":{lat:36.931,lng:-82.6216,slug:"norton"},"Nottoway":{lat:37.1472,lng:-78.0518,slug:"nottoway"},"Orange":{lat:38.2475,lng:-78.0152,slug:"orange"},"Page":{lat:38.6218,lng:-78.4811,slug:"page"},"Patrick":{lat:36.6802,lng:-80.2838,slug:"patrick"},"Petersburg":{lat:37.2125,lng:-77.408,slug:"petersburg"},"Pittsylvania":{lat:36.818,lng:-79.3981,slug:"pittsylvania"},"Poquoson":{lat:37.135,lng:-76.3593,slug:"poquoson"},"Portsmouth":{lat:36.854,lng:-76.3594,slug:"portsmouth"},"Powhatan":{lat:37.5513,lng:-77.9151,slug:"powhatan"},"Prince Edward":{lat:37.2324,lng:-78.4435,slug:"princeedward"},"Prince George":{lat:37.1846,lng:-77.2339,slug:"princegeorge"},"Prince William":{lat:38.7051,lng:-77.4858,slug:"princewilliam"},"Pulaski":{lat:37.0645,lng:-80.7095,slug:"pulaski"},"Radford":{lat:37.1222,lng:-80.5599,slug:"radford"},"Rappahannock":{lat:38.6844,lng:-78.1565,slug:"rappahannock"},"Richmond":{lat:37.9378,lng:-76.7243,slug:"richmond"},"Roanoke":{lat:37.2788,lng:-79.9595,slug:"roanoke"},"Rockbridge":{lat:37.8156,lng:-79.4512,slug:"rockbridge"},"Rockingham":{lat:38.5095,lng:-78.874,slug:"rockingham"},"Russell":{lat:36.9273,lng:-82.1016,slug:"russell"},"Salem":{lat:37.285,lng:-80.0543,slug:"salem"},"Scott":{lat:36.7134,lng:-82.6031,slug:"scott"},"Shenandoah":{lat:38.855,lng:-78.5709,slug:"shenandoah"},"Smyth":{lat:36.8462,lng:-81.5372,slug:"smyth"},"Southampton":{lat:36.7233,lng:-77.1026,slug:"southampton"},"Spotsylvania":{lat:38.1851,lng:-77.6579,slug:"spotsylvania"},"Stafford":{lat:38.4168,lng:-77.452,slug:"stafford"},"Staunton":{lat:38.1611,lng:-79.0633,slug:"staunton"},"Suffolk":{lat:36.6967,lng:-76.6391,slug:"suffolk"},"Surry":{lat:37.1142,lng:-76.8953,slug:"surry"},"Sussex":{lat:36.9251,lng:-77.254,slug:"sussex"},"Tazewell":{lat:37.1241,lng:-81.5687,slug:"tazewell"},"Virginia Beach":{lat:36.7338,lng:-76.046,slug:"virginiabeach"},"Warren":{lat:38.9133,lng:-78.2115,slug:"warren"},"Washington":{lat:36.7224,lng:-81.9546,slug:"washington"},"Waynesboro":{lat:38.0675,lng:-78.8979,slug:"waynesboro"},"Westmoreland":{lat:38.104,lng:-76.7904,slug:"westmoreland"},"Williamsburg":{lat:37.2701,lng:-76.706,slug:"williamsburg"},"Winchester":{lat:39.1735,lng:-78.1704,slug:"winchester"},"Wise":{lat:36.9737,lng:-82.615,slug:"wise"},"Wythe":{lat:36.9172,lng:-81.0803,slug:"wythe"},"York":{lat:37.2471,lng:-76.563,slug:"york"}},
+  PR: {"Adjuntas":{lat:18.1778,lng:-66.7511,slug:"adjuntas"},"Aguada":{lat:18.361,lng:-67.1733,slug:"aguada"},"Aguadilla":{lat:18.4576,lng:-67.1187,slug:"aguadilla"},"Aguas Buenas":{lat:18.2524,lng:-66.1343,slug:"aguasbuenas"},"Aibonito":{lat:18.1321,lng:-66.2583,slug:"aibonito"},"Arecibo":{lat:18.4053,lng:-66.6771,slug:"arecibo"},"Arroyo":{lat:17.9903,lng:-66.0573,slug:"arroyo"},"Añasco":{lat:18.2898,lng:-67.1227,slug:"aasco"},"Barceloneta":{lat:18.4464,lng:-66.5634,slug:"barceloneta"},"Barranquitas":{lat:18.2019,lng:-66.3075,slug:"barranquitas"},"Bayamón":{lat:18.3473,lng:-66.1702,slug:"bayamn"},"Cabo Rojo":{lat:18.0418,lng:-67.154,slug:"caborojo"},"Caguas":{lat:18.2186,lng:-66.0537,slug:"caguas"},"Camuy":{lat:18.4208,lng:-66.8641,slug:"camuy"},"Canóvanas":{lat:18.3196,lng:-65.8844,slug:"canvanas"},"Carolina":{lat:18.3778,lng:-65.9618,slug:"carolina"},"Cataño":{lat:18.4388,lng:-66.1403,slug:"catao"},"Cayey":{lat:18.1087,lng:-66.1437,slug:"cayey"},"Ceiba":{lat:18.2498,lng:-65.6728,slug:"ceiba"},"Ciales":{lat:18.2928,lng:-66.5186,slug:"ciales"},"Cidra":{lat:18.1772,lng:-66.1651,slug:"cidra"},"Coamo":{lat:18.0974,lng:-66.3598,slug:"coamo"},"Comerío":{lat:18.2323,lng:-66.2189,slug:"comero"},"Corozal":{lat:18.3044,lng:-66.3299,slug:"corozal"},"Culebra":{lat:18.3154,lng:-65.2875,slug:"culebra"},"Dorado":{lat:18.4351,lng:-66.2681,slug:"dorado"},"Fajardo":{lat:18.3165,lng:-65.6754,slug:"fajardo"},"Florida":{lat:18.3737,lng:-66.5602,slug:"florida"},"Guayama":{lat:18.0066,lng:-66.1303,slug:"guayama"},"Guayanilla":{lat:18.04,lng:-66.7979,slug:"guayanilla"},"Guaynabo":{lat:18.3457,lng:-66.1146,slug:"guaynabo"},"Gurabo":{lat:18.264,lng:-65.975,slug:"gurabo"},"Guánica":{lat:17.9832,lng:-66.9197,slug:"gunica"},"Hatillo":{lat:18.4099,lng:-66.7994,slug:"hatillo"},"Hormigueros":{lat:18.1337,lng:-67.1117,slug:"hormigueros"},"Humacao":{lat:18.1411,lng:-65.8124,slug:"humacao"},"Isabela":{lat:18.4519,lng:-67.0025,slug:"isabela"},"Jayuya":{lat:18.2031,lng:-66.5859,slug:"jayuya"},"Juana Díaz":{lat:18.0502,lng:-66.4965,slug:"juanadaz"},"Juncos":{lat:18.219,lng:-65.9107,slug:"juncos"},"Lajas":{lat:18.0092,lng:-67.0401,slug:"lajas"},"Lares":{lat:18.2647,lng:-66.8626,slug:"lares"},"Las Marías":{lat:18.2347,lng:-66.9854,slug:"lasmaras"},"Las Piedras":{lat:18.1873,lng:-65.8689,slug:"laspiedras"},"Loíza":{lat:18.4214,lng:-65.8987,slug:"loza"},"Luquillo":{lat:18.3463,lng:-65.7266,slug:"luquillo"},"Manatí":{lat:18.4203,lng:-66.4916,slug:"manat"},"Maricao":{lat:18.172,lng:-66.9519,slug:"maricao"},"Maunabo":{lat:18.0175,lng:-65.9172,slug:"maunabo"},"Mayagüez":{lat:18.1751,lng:-67.333,slug:"mayagez"},"Moca":{lat:18.3749,lng:-67.0791,slug:"moca"},"Morovis":{lat:18.3189,lng:-66.4217,slug:"morovis"},"Naguabo":{lat:18.2283,lng:-65.7618,slug:"naguabo"},"Naranjito":{lat:18.2851,lng:-66.2584,slug:"naranjito"},"Orocovis":{lat:18.2151,lng:-66.4417,slug:"orocovis"},"Patillas":{lat:18.0282,lng:-66.0084,slug:"patillas"},"Peñuelas":{lat:18.0645,lng:-66.7285,slug:"peuelas"},"Ponce":{lat:18.0596,lng:-66.6195,slug:"ponce"},"Quebradillas":{lat:18.4404,lng:-66.9205,slug:"quebradillas"},"Rincón":{lat:18.336,lng:-67.231,slug:"rincn"},"Río Grande":{lat:18.3492,lng:-65.8062,slug:"rogrande"},"Sabana Grande":{lat:18.0829,lng:-66.9407,slug:"sabanagrande"},"Salinas":{lat:18.012,lng:-66.25,slug:"salinas"},"San Germán":{lat:18.1082,lng:-67.0395,slug:"sangermn"},"San Juan":{lat:18.3888,lng:-66.0606,slug:"sanjuan"},"San Lorenzo":{lat:18.15,lng:-65.9824,slug:"sanlorenzo"},"San Sebastián":{lat:18.3301,lng:-66.9681,slug:"sansebastin"},"Santa Isabel":{lat:17.9945,lng:-66.3928,slug:"santaisabel"},"Toa Alta":{lat:18.3601,lng:-66.2452,slug:"toaalta"},"Toa Baja":{lat:18.4285,lng:-66.2008,slug:"toabaja"},"Trujillo Alto":{lat:18.3276,lng:-65.9947,slug:"trujilloalto"},"Utuado":{lat:18.2657,lng:-66.6959,slug:"utuado"},"Vega Alta":{lat:18.4097,lng:-66.3394,slug:"vegaalta"},"Vega Baja":{lat:18.4253,lng:-66.4004,slug:"vegabaja"},"Vieques":{lat:18.1226,lng:-65.4391,slug:"vieques"},"Villalba":{lat:18.1267,lng:-66.4769,slug:"villalba"},"Yabucoa":{lat:18.0709,lng:-65.8992,slug:"yabucoa"},"Yauco":{lat:18.0897,lng:-66.8588,slug:"yauco"}},
+  NY: {"Albany":{lat:42.6003,lng:-73.9776,slug:"albany"},"Allegany":{lat:42.2577,lng:-78.0264,slug:"allegany"},"Bronx":{lat:40.8512,lng:-73.8597,slug:"bronx"},"Broome":{lat:42.1608,lng:-75.8184,slug:"broome"},"Cattaraugus":{lat:42.2476,lng:-78.6794,slug:"cattaraugus"},"Cayuga":{lat:42.9141,lng:-76.557,slug:"cayuga"},"Chautauqua":{lat:42.2277,lng:-79.367,slug:"chautauqua"},"Chemung":{lat:42.1415,lng:-76.7585,slug:"chemung"},"Chenango":{lat:42.494,lng:-75.6082,slug:"chenango"},"Clinton":{lat:44.7461,lng:-73.6798,slug:"clinton"},"Columbia":{lat:42.2486,lng:-73.6314,slug:"columbia"},"Cortland":{lat:42.5957,lng:-76.0707,slug:"cortland"},"Delaware":{lat:42.1976,lng:-74.9665,slug:"delaware"},"Dutchess":{lat:41.7635,lng:-73.7433,slug:"dutchess"},"Erie":{lat:42.7644,lng:-78.7316,slug:"erie"},"Essex":{lat:44.1174,lng:-73.7738,slug:"essex"},"Franklin":{lat:44.5936,lng:-74.3035,slug:"franklin"},"Fulton":{lat:43.1138,lng:-74.4169,slug:"fulton"},"Genesee":{lat:42.9992,lng:-78.1959,slug:"genesee"},"Greene":{lat:42.2758,lng:-74.1237,slug:"greene"},"Hamilton":{lat:43.6609,lng:-74.4986,slug:"hamilton"},"Herkimer":{lat:43.4205,lng:-74.9622,slug:"herkimer"},"Jefferson":{lat:44.0497,lng:-75.922,slug:"jefferson"},"Kings":{lat:40.6405,lng:-73.9432,slug:"kings"},"Lewis":{lat:43.7844,lng:-75.449,slug:"lewis"},"Livingston":{lat:42.7247,lng:-77.7796,slug:"livingston"},"Madison":{lat:42.9137,lng:-75.6733,slug:"madison"},"Monroe":{lat:43.1462,lng:-77.6974,slug:"monroe"},"Montgomery":{lat:42.9031,lng:-74.4448,slug:"montgomery"},"Nassau":{lat:40.7377,lng:-73.5851,slug:"nassau"},"New York":{lat:40.783,lng:-73.9632,slug:"newyork"},"Niagara":{lat:43.2011,lng:-78.7446,slug:"niagara"},"Oneida":{lat:43.2436,lng:-75.4374,slug:"oneida"},"Onondaga":{lat:43.0104,lng:-76.1952,slug:"onondaga"},"Ontario":{lat:42.8529,lng:-77.3043,slug:"ontario"},"Orange":{lat:41.4025,lng:-74.3072,slug:"orange"},"Orleans":{lat:43.2522,lng:-78.2313,slug:"orleans"},"Oswego":{lat:43.4299,lng:-76.1453,slug:"oswego"},"Otsego":{lat:42.6357,lng:-75.0306,slug:"otsego"},"Putnam":{lat:41.4245,lng:-73.7566,slug:"putnam"},"Queens":{lat:40.6995,lng:-73.8186,slug:"queens"},"Rensselaer":{lat:42.7086,lng:-73.5117,slug:"rensselaer"},"Richmond":{lat:40.5807,lng:-74.1524,slug:"richmond"},"Rockland":{lat:41.1516,lng:-74.0245,slug:"rockland"},"Saratoga":{lat:43.1049,lng:-73.8649,slug:"saratoga"},"Schenectady":{lat:42.8123,lng:-74.0585,slug:"schenectady"},"Schoharie":{lat:42.5887,lng:-74.4421,slug:"schoharie"},"Schuyler":{lat:42.3944,lng:-76.8803,slug:"schuyler"},"Seneca":{lat:42.7782,lng:-76.8234,slug:"seneca"},"St. Lawrence":{lat:44.4969,lng:-75.0675,slug:"stlawrence"},"Steuben":{lat:42.2685,lng:-77.3815,slug:"steuben"},"Suffolk":{lat:40.8693,lng:-72.8471,slug:"suffolk"},"Sullivan":{lat:41.716,lng:-74.7644,slug:"sullivan"},"Tioga":{lat:42.1687,lng:-76.3073,slug:"tioga"},"Tompkins":{lat:42.4509,lng:-76.4724,slug:"tompkins"},"Ulster":{lat:41.8877,lng:-74.2598,slug:"ulster"},"Warren":{lat:43.5634,lng:-73.8424,slug:"warren"},"Washington":{lat:43.3073,lng:-73.4284,slug:"washington"},"Wayne":{lat:43.1565,lng:-77.0295,slug:"wayne"},"Westchester":{lat:41.1616,lng:-73.7564,slug:"westchester"},"Wyoming":{lat:42.6995,lng:-78.2227,slug:"wyoming"},"Yates":{lat:42.6335,lng:-77.1052,slug:"yates"}},
+  MT: {"Beaverhead":{lat:45.1354,lng:-112.9036,slug:"beaverhead"},"Big Horn":{lat:45.4235,lng:-107.4901,slug:"bighorn"},"Blaine":{lat:48.433,lng:-108.9602,slug:"blaine"},"Broadwater":{lat:46.3253,lng:-111.497,slug:"broadwater"},"Carbon":{lat:45.2254,lng:-109.0287,slug:"carbon"},"Carter":{lat:45.5169,lng:-104.5365,slug:"carter"},"Cascade":{lat:47.3099,lng:-111.3462,slug:"cascade"},"Chouteau":{lat:47.8803,lng:-110.4352,slug:"chouteau"},"Custer":{lat:46.2524,lng:-105.5715,slug:"custer"},"Daniels":{lat:48.7838,lng:-105.5505,slug:"daniels"},"Dawson":{lat:47.2663,lng:-104.9007,slug:"dawson"},"Deer Lodge":{lat:46.0616,lng:-113.0677,slug:"deerlodge"},"Fallon":{lat:46.3349,lng:-104.4186,slug:"fallon"},"Fergus":{lat:47.2645,lng:-109.2244,slug:"fergus"},"Flathead":{lat:48.2966,lng:-114.0533,slug:"flathead"},"Gallatin":{lat:45.5435,lng:-111.1709,slug:"gallatin"},"Garfield":{lat:47.2773,lng:-106.9936,slug:"garfield"},"Glacier":{lat:48.705,lng:-112.9942,slug:"glacier"},"Golden Valley":{lat:46.382,lng:-109.1744,slug:"goldenvalley"},"Granite":{lat:46.4047,lng:-113.4412,slug:"granite"},"Hill":{lat:48.6286,lng:-110.1114,slug:"hill"},"Jefferson":{lat:46.1508,lng:-112.0898,slug:"jefferson"},"Judith Basin":{lat:47.0463,lng:-110.2677,slug:"judithbasin"},"Lake":{lat:47.6497,lng:-114.0901,slug:"lake"},"Lewis and Clark":{lat:47.1273,lng:-112.3935,slug:"lewisandclark"},"Liberty":{lat:48.562,lng:-111.0229,slug:"liberty"},"Lincoln":{lat:48.5408,lng:-115.4052,slug:"lincoln"},"Madison":{lat:45.3013,lng:-111.9206,slug:"madison"},"McCone":{lat:47.6486,lng:-105.7924,slug:"mccone"},"Meagher":{lat:46.5984,lng:-110.8898,slug:"meagher"},"Mineral":{lat:47.1433,lng:-114.99,slug:"mineral"},"Missoula":{lat:47.0363,lng:-113.9259,slug:"missoula"},"Musselshell":{lat:46.4972,lng:-108.3938,slug:"musselshell"},"Park":{lat:45.4887,lng:-110.5266,slug:"park"},"Petroleum":{lat:47.1169,lng:-108.2541,slug:"petroleum"},"Phillips":{lat:48.2588,lng:-107.915,slug:"phillips"},"Pondera":{lat:48.2288,lng:-112.2251,slug:"pondera"},"Powder River":{lat:45.3948,lng:-105.6311,slug:"powderriver"},"Powell":{lat:46.8531,lng:-112.9343,slug:"powell"},"Prairie":{lat:46.8614,lng:-105.3813,slug:"prairie"},"Ravalli":{lat:46.0817,lng:-114.119,slug:"ravalli"},"Richland":{lat:47.7852,lng:-104.5582,slug:"richland"},"Roosevelt":{lat:48.2952,lng:-105.0114,slug:"roosevelt"},"Rosebud":{lat:46.23,lng:-106.7303,slug:"rosebud"},"Sanders":{lat:47.6735,lng:-115.1389,slug:"sanders"},"Sheridan":{lat:48.7215,lng:-104.5064,slug:"sheridan"},"Silver Bow":{lat:45.9061,lng:-112.6553,slug:"silverbow"},"Stillwater":{lat:45.6701,lng:-109.394,slug:"stillwater"},"Sweet Grass":{lat:45.8125,lng:-109.9414,slug:"sweetgrass"},"Teton":{lat:47.8387,lng:-112.2397,slug:"teton"},"Toole":{lat:48.6557,lng:-111.6941,slug:"toole"},"Treasure":{lat:46.212,lng:-107.2734,slug:"treasure"},"Valley":{lat:48.3645,lng:-106.67,slug:"valley"},"Wheatland":{lat:46.4677,lng:-109.8444,slug:"wheatland"},"Wibaux":{lat:46.9637,lng:-104.2506,slug:"wibaux"},"Yellowstone":{lat:45.9353,lng:-108.2771,slug:"yellowstone"}},
+  MA: {"Barnstable":{lat:41.7236,lng:-70.2913,slug:"barnstable"},"Berkshire":{lat:42.374,lng:-73.2018,slug:"berkshire"},"Bristol":{lat:41.7979,lng:-71.1176,slug:"bristol"},"Dukes":{lat:41.3988,lng:-70.6501,slug:"dukes"},"Essex":{lat:42.6726,lng:-70.956,slug:"essex"},"Franklin":{lat:42.5798,lng:-72.5789,slug:"franklin"},"Hampden":{lat:42.134,lng:-72.6309,slug:"hampden"},"Hampshire":{lat:42.3395,lng:-72.6503,slug:"hampshire"},"Middlesex":{lat:42.4842,lng:-71.3972,slug:"middlesex"},"Nantucket":{lat:41.2842,lng:-70.0734,slug:"nantucket"},"Norfolk":{lat:42.1548,lng:-71.2196,slug:"norfolk"},"Plymouth":{lat:41.9536,lng:-70.8139,slug:"plymouth"},"Suffolk":{lat:42.3329,lng:-71.0775,slug:"suffolk"},"Worcester":{lat:42.3484,lng:-71.9035,slug:"worcester"}},
+  VT: {"Addison":{lat:44.0333,lng:-73.1495,slug:"addison"},"Bennington":{lat:43.05,lng:-73.0959,slug:"bennington"},"Caledonia":{lat:44.4677,lng:-72.1047,slug:"caledonia"},"Chittenden":{lat:44.4648,lng:-73.0791,slug:"chittenden"},"Essex":{lat:44.7264,lng:-71.734,slug:"essex"},"Franklin":{lat:44.8568,lng:-72.9098,slug:"franklin"},"Grand Isle":{lat:44.8089,lng:-73.2954,slug:"grandisle"},"Lamoille":{lat:44.6052,lng:-72.6411,slug:"lamoille"},"Orange":{lat:44.0037,lng:-72.3791,slug:"orange"},"Orleans":{lat:44.8298,lng:-72.2459,slug:"orleans"},"Rutland":{lat:43.5739,lng:-73.0379,slug:"rutland"},"Washington":{lat:44.2712,lng:-72.6182,slug:"washington"},"Windham":{lat:42.9792,lng:-72.7196,slug:"windham"},"Windsor":{lat:43.5874,lng:-72.594,slug:"windsor"}},
+  CT: {"Fairfield":{lat:41.2677,lng:-73.3744,slug:"fairfield"},"Hartford":{lat:41.8039,lng:-72.7323,slug:"hartford"},"Litchfield":{lat:41.7913,lng:-73.2459,slug:"litchfield"},"Middlesex":{lat:41.4598,lng:-72.5395,slug:"middlesex"},"New Haven":{lat:41.4179,lng:-72.9283,slug:"newhaven"},"New London":{lat:41.4884,lng:-72.1101,slug:"newlondon"},"Tolland":{lat:41.8612,lng:-72.3363,slug:"tolland"},"Windham":{lat:41.8298,lng:-71.9864,slug:"windham"}}
 };
 try { Object.assign(GIS_COUNTIES, GIS_COUNTIES_MORE); } catch (e) {}
 
@@ -2279,10 +2309,17 @@ const GIS_STATE_PARCELS = {
   IN: "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0",  // via proxy
   AR: "https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6",          // via proxy
   MN: "https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/FeatureServer/0", // via proxy, geometry only
+  VA: "https://gismaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0",          // VGIN statewide parcels (lot lines + parcel id)
+  PR: "https://sige.pr.gov/server/rest/services/crim/crim_parcelas/FeatureServer/0",                               // CRIM Catastro Digital (cadastral parcels)
+  NY: "https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/0",                 // NYS statewide tax parcels (public counties)
+  MT: "https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/Parcels/MapServer/0",                           // Montana statewide cadastral (DOR)
+  MA: "https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/L3_TAXPAR_POLY_ASSESS_gdb/FeatureServer/0", // MassGIS L3 standardized assessor parcels
+  VT: "https://services1.arcgis.com/BkFxaEFNwHqX3tAw/arcgis/rest/services/FS_VCGI_VTPARCELS_WM_NOCACHE_v2/FeatureServer/1", // VCGI statewide standardized parcels (poly)
+  CT: "https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/arcgis/rest/services/Connecticut_State_Parcel_Layer_2023/FeatureServer/0", // CT statewide parcel layer 2023 (CAMA)
 };
 
 // APN / parcel-id field name on each statewide service (used by APN search; omit = no APN search)
-const GIS_STATE_APN_FIELD = { FL: "PARCEL_ID", TX: "GEO_ID", TN: "PARCELID", NC: "PARNO", OH: "LocalParcelID", WI: "PARCELID", IN: "parcel_id", AR: "parcelid" };
+const GIS_STATE_APN_FIELD = { FL: "PARCEL_ID", TX: "GEO_ID", TN: "PARCELID", NC: "PARNO", OH: "LocalParcelID", WI: "PARCELID", IN: "parcel_id", AR: "parcelid", VA: "GPIN", PR: "NUM_CATASTRO", NY: "PRINT_KEY", MT: "PARCELID", MA: "LOC_ID", VT: "SPAN" };
 
 // Bounding-box center [lat, lng] of a GeoJSON feature (for flying to a found parcel)
 function featCenter(feat) {
@@ -2384,37 +2421,57 @@ function CompsColumns({ res, pal }) {
 // Government URL generators per state
 function getCountyUrls(state, name, slug) {
   const s = slug || name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-  if (state === "FL") return {
+  const g = (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  // Sold-land comp source — supplements the on-the-fly comps engine (and stands in where a
+  // state's parcel layer has no sale data, e.g. VA/PR).
+  const comps = g(`recent vacant land sales sold ${name} ${state === "PR" ? "Puerto Rico" : state}`);
+  let urls;
+  if (state === "FL") urls = {
     assessor: `https://www.${s}pa.gov`,
     taxCollector: `https://www.${s}tc.com`,
     auction: `https://${s}.realtaxdeed.com`,
     gis: `https://gis.${s}county.gov`,
   };
-  if (state === "TX") return {
+  else if (state === "TX") urls = {
     assessor: `https://www.${s}cad.org`,
     taxCollector: `https://www.${s}county.gov/tax-assessor`,
     auction: `https://www.${s}county.gov/tax-sales`,
     gis: `https://gis.${s}county.gov`,
   };
-  if (state === "TN") return {
+  else if (state === "TN") urls = {
     assessor: `https://assessoroftennessee.com/property-search?county=${encodeURIComponent(name)}`,
     taxCollector: `https://tntrustee.com/${s}`,
     auction: `https://www.tntaxauctions.com/?county=${encodeURIComponent(name)}`,
     gis: `https://gis.${s}county.gov`,
   };
-  if (state === "NC") return {
+  else if (state === "NC") urls = {
     assessor: `https://www.${s}countync.gov/departments/tax`,
     taxCollector: `https://www.${s}countync.gov/departments/tax/tax-bill-search`,
     auction: `https://www.${s}countync.gov/departments/tax/delinquent-tax-liens`,
     gis: `https://www.${s}countync.gov/departments/gis`,
   };
-  const g = (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
-  return {
+  else if (state === "VA") urls = {
+    // Virginia assesses real estate per locality (county/independent city); no statewide portal.
+    assessor: g(`${name} Virginia real estate assessment property record search`),
+    taxCollector: g(`${name} Virginia treasurer real estate tax bill`),
+    auction: g(`${name} Virginia delinquent real estate tax sale auction`),
+    gis: g(`${name} Virginia GIS parcel viewer map`),
+  };
+  else if (state === "PR") urls = {
+    // Puerto Rico: CRIM (Centro de Recaudación de Ingresos Municipales) runs the digital cadastre + property tax.
+    assessor: "https://catastro.crimpr.net/cdprpc/",
+    taxCollector: g(`CRIM Puerto Rico contribución sobre la propiedad ${name}`),
+    auction: g(`Puerto Rico subasta propiedad CRIM contribución morosa ${name}`),
+    gis: "https://catastro.crimpr.net/cdprpc/",
+  };
+  else urls = {
     assessor: g(`${name} County ${state} property appraiser parcel search`),
     taxCollector: g(`${name} County ${state} tax collector delinquent property tax`),
     auction: g(`${name} County ${state} tax deed sale auction list`),
     gis: g(`${name} County ${state} GIS parcel viewer map`),
   };
+  urls.comps = comps;
+  return urls;
 }
 
 // Singleton Leaflet loader
@@ -2536,7 +2593,7 @@ async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = ""
   } catch (_) { return []; }
 }
 
-const STATE_ABBR = { "Florida": "FL", "Texas": "TX", "Tennessee": "TN", "North Carolina": "NC" };
+const STATE_ABBR = { "Florida": "FL", "Texas": "TX", "Tennessee": "TN", "North Carolina": "NC", "Virginia": "VA", "Puerto Rico": "PR", "New York": "NY", "Montana": "MT", "Massachusetts": "MA", "Vermont": "VT", "Connecticut": "CT" };
 
 const getAutoTheme = () => { const h = new Date().getHours(); return (h >= 20 || h < 7) ? "dark" : "light"; };
 
@@ -2573,15 +2630,15 @@ function extractParcelFields(props) {
     return "";
   };
   return {
-    apn:         pick("PARCEL_ID","APN","PIN","PARCELID","FOLIO","ACCOUNT_NUM","ACCT","GPIN","REID","PIN_NUM","PARCEL","ACCOUNT","PROP_ID","GEO_ID","PARCELNO","PARNO","PARID","PARCELNUMB"),
-    owner:       pick("OWNER","OWNER_NAME","OWNERNAME","OWN_NAME","OWNER1","OWNER_FULL","TAXPAYER","NAME","OWNER_FIRST_NAME","OWNNAME1","OWN1"),
+    apn:         pick("PARCEL_ID","APN","PIN","PARCELID","FOLIO","ACCOUNT_NUM","ACCT","GPIN","REID","PIN_NUM","PARCEL","ACCOUNT","PROP_ID","GEO_ID","PARCELNO","PARNO","PARID","PARCELNUMB","NUM_CATASTRO","CATASTRO","CATASTRO_N","PRINT_KEY","SPAN","LOC_ID","MAP_PAR_ID","SBL","PROPERTYID"),
+    owner:       pick("OWNER","OWNER_NAME","OWNERNAME","OWN_NAME","OWNER1","OWNER_FULL","TAXPAYER","NAME","OWNER_FIRST_NAME","OWNNAME1","OWN1","OWNER_2","PRIMARY_OWNER","OWNERNME1"),
     address:     pick("SITE_ADDR","SITUS","PROP_ADDR","PROPERTY_ADDRESS","SITE_ADDRESS","LOCATION","ADDRESS","PHY_ADDR","SITUS_ADDR","PROP_LOCATION","PHY_ADDR1","SITEADDRESS","PAR_ADDR","SITE_ADD","PROPADDR"),
     mailingAddr: pick("MAIL_ADDR","MAILING_ADDRESS","MAIL_ADDRESS","OWNER_ADDR","OWN_ADDR","MAIL_STREET","OWN_ADDR1","OWNER_ADDRESS","MAILADDR"),
     city:        pick("MAIL_CITY","OWNER_CITY","CITY","CITY_NAME","MAIL_CTY","OWN_CITY","PHY_CITY"),
     state:       pick("MAIL_STATE","OWNER_STATE","STATE","ST","MAIL_ST","OWN_STATE"),
     zip:         pick("MAIL_ZIP","OWNER_ZIP","ZIP","ZIPCODE","ZIP_CODE","MAIL_ZIP5","OWN_ZIPCD","PHY_ZIPCD"),
-    acres:       pick("CALC_ACREAGE","ACREAGE","ACRES","LAND_ACRES","GISACRES","LANDAREA","LGL_ACRES","CALC_ACRE","GIS_ACRES","ACREAGE_CA","DEED_ACRES","LEGAL_AREA","DEEDAC","GIS_ACRE")
-                 || (pick("LND_SQFOOT","LAND_SQFT","SQFT_LAND","LANDSQFT") ? sqftToAcres(pick("LND_SQFOOT","LAND_SQFT","SQFT_LAND","LANDSQFT")).toFixed(3) : ""),
+    acres:       pick("CALC_ACREAGE","ACREAGE","ACRES","LAND_ACRES","GISACRES","LANDAREA","LGL_ACRES","CALC_ACRE","GIS_ACRES","ACREAGE_CA","DEED_ACRES","LEGAL_AREA","DEEDAC","GIS_ACRE","CALC_ACRES","TOTALACRES","GISACRE","ACRES_CALC","SHAPEAREA")
+                 || (pick("LND_SQFOOT","LAND_SQFT","SQFT_LAND","LANDSQFT","LOT_SIZE","LOTSIZE","SQUARE_FOOTAGE") ? sqftToAcres(pick("LND_SQFOOT","LAND_SQFT","SQFT_LAND","LANDSQFT","LOT_SIZE","LOTSIZE","SQUARE_FOOTAGE")).toFixed(3) : ""),
     zoning:      pick("ZONING","ZONE_CODE","ZONING_CODE","LND_USE_CODE","USE_CODE","DOR_UC","LUSE_DESC","PROP_USE"),
     landValue:   pick("LAND_VALUE","LND_VAL","ASSESSED_VALUE","JV","LAND_ASSESS","LAND_APPRAISED"),
     totalValue:  pick("TOTAL_VALUE","JUST_VALUE","JV","MARKET_VALUE","ASSESSED_VALUE","TOTAL_ASSESS","APPRAISED","TOT_APPR_VAL","MKT_VAL","PARVAL","TOTAL_VAL","JUST_VAL","TOTALVALUE"),
@@ -2750,7 +2807,10 @@ function ParcelCard({ parcel, onClose, onAddToPipeline, onToggleSave, onStartDea
           {!comps ? (
             <div style={{ fontSize: 12, color: T.textDim, padding: "4px 0", animation: "gpulse 1.2s infinite" }}>◌ Pulling recent sales nearby…</div>
           ) : comps.unsupported ? (
-            <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>On-the-fly comps run on Florida parcels today (FL's data carries sale price + date). Other states need a sales feed — ask to wire one in.</div>
+            <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>
+              Auto-comps run on parcels whose data carries sale price + date (Florida today). This state's layer is boundary-only, so pull recent land sales manually:
+              {urls && urls.comps ? <a href={urls.comps} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 6, color: T.accent, fontWeight: 700, textDecoration: "none" }}>↗ Recent sold land comps nearby</a> : null}
+            </div>
           ) : comps.timeout ? (
             <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>The Florida parcel service was slow — comps didn't load. Re-tap the lot to retry.</div>
           ) : (
@@ -2808,9 +2868,26 @@ function GISTab({ data, update, onStartDeal }) {
   const loaderRef = React.useRef(null);        // exposes the in-effect viewport loader
   const selectAtRef = React.useRef(null);      // exposes the in-effect parcel selector (for search)
   const ctrlRef = React.useRef({});            // fresh state for map event handlers
+  const ctlEls = React.useRef([]);             // overlay control containers (for touch-event isolation)
+
+  // Stop Leaflet (esp. leaflet-rotate's touch handlers) from swallowing taps on overlay
+  // controls — without this, +/−/compass/★ fire on desktop clicks but not on mobile touches.
+  const registerCtl = React.useCallback((el) => {
+    if (!el) return;
+    if (!ctlEls.current.includes(el)) ctlEls.current.push(el);
+    const L = window.L;
+    if (L && L.DomEvent) { L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); }
+  }, []);
 
   const [theme, setTheme] = React.useState("dark");
   const [mapReady, setMapReady] = React.useState(false);
+
+  // Re-apply control touch-isolation once Leaflet has loaded (controls mount before window.L exists)
+  React.useEffect(() => {
+    const L = window.L;
+    if (mapReady && L && L.DomEvent) ctlEls.current.forEach(el => { L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); });
+  }, [mapReady]);
+
   const [loading, setLoading] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const [rotation, setRotation] = React.useState(0);
@@ -2827,7 +2904,7 @@ function GISTab({ data, update, onStartDeal }) {
   const [searchQ, setSearchQ] = React.useState("");
   const [searching, setSearching] = React.useState(false);
 
-  const PARCEL_ZOOM = 15;   // show lot outlines at this zoom and deeper
+  const PARCEL_ZOOM = 13;   // show lot outlines at this zoom and deeper (lower = lines visible from further out)
   const T = GT[theme];
   const isMobile = useIsMobile();
   const saved = data.gisSaved || [];
@@ -2837,7 +2914,9 @@ function GISTab({ data, update, onStartDeal }) {
   const countyNames = React.useMemo(() => Object.keys(GIS_COUNTIES[stateFilter] || {}), [stateFilter]);
 
   const STATE_CENTERS = { FL: [27.8, -81.5, 7], TX: [31.5, -99.3, 6], TN: [35.8, -86.4, 7], NC: [35.5, -79.4, 7],
-    OH: [40.32, -82.83, 7], IN: [39.84, -86.22, 7], WI: [44.41, -89.77, 7], MN: [45.55, -94.43, 6], AR: [34.91, -92.43, 7], NM: [34.55, -105.89, 7] };
+    OH: [40.32, -82.83, 7], IN: [39.84, -86.22, 7], WI: [44.41, -89.77, 7], MN: [45.55, -94.43, 6], AR: [34.91, -92.43, 7], NM: [34.55, -105.89, 7],
+    VA: [37.7, -78.7, 7], PR: [18.22, -66.4, 9],
+    NY: [42.9, -75.5, 7], MT: [47.0, -109.6, 6], MA: [42.2, -71.8, 8], VT: [44.0, -72.7, 8], CT: [41.6, -72.7, 9] };
 
   React.useEffect(() => {
     let mounted = true;
@@ -3012,7 +3091,7 @@ function GISTab({ data, update, onStartDeal }) {
       /\b(st|ave|rd|dr|blvd|ln|ct|way|hwy|pkwy|cir|pl|ter|trl|street|avenue|road|drive|lane|court|circle|place|trail|highway|parkway)\b/i.test(q));
     // Look the APN up across all four statewide services in parallel; switch states on a hit
     const tryAPN = async () => {
-      const order = [stateFilter, ...["FL","TX","TN","NC"].filter(s => s !== stateFilter)];
+      const order = [stateFilter, ...Object.keys(GIS_STATE_APN_FIELD).filter(s => s !== stateFilter)];
       const hits = await Promise.all(order.map(async (st) => {
         const svc = GIS_STATE_PARCELS[st], fld = GIS_STATE_APN_FIELD[st];
         if (!svc || !fld) return null;
@@ -3122,10 +3201,10 @@ function GISTab({ data, update, onStartDeal }) {
   const cardOpen = !!selected;
 
   return (
-    <div style={{ position: "relative", height: isMobile ? "calc(100dvh - 84px)" : "calc(100vh - 118px)", minHeight: isMobile ? 360 : 520, background: T.bg, borderRadius: 0, overflow: "hidden", border: "none", fontFamily: "'Inter',system-ui,-apple-system,sans-serif" }}>
+    <div style={{ position: "relative", height: isMobile ? "calc(100dvh - 56px)" : "calc(100vh - 84px)", minHeight: isMobile ? 360 : 520, background: T.bg, borderRadius: 0, overflow: "hidden", border: "none", fontFamily: "'Inter',system-ui,-apple-system,sans-serif" }}>
       <style>{`
         .gm .leaflet-pane{z-index:1}.gm .leaflet-overlay-pane{z-index:4}.gm .leaflet-marker-pane{z-index:6}
-        .gcb{backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:opacity .15s}
+        .gcb{backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:opacity .15s;touch-action:manipulation}
         .gcb:hover{opacity:1!important}
         @keyframes gpulse{0%,100%{opacity:.55}50%{opacity:1}}
         .lc-parcel-sel{filter:drop-shadow(0 0 4px #FFD400) drop-shadow(0 0 9px rgba(255,212,0,.55));animation:gsel 1.6s ease-in-out infinite}
@@ -3157,7 +3236,7 @@ function GISTab({ data, update, onStartDeal }) {
       )}
 
       {/* Top bar — state pills (row 1) + county dropdown (row 2) */}
-      <div style={{ position: "absolute", top: 12, left: 12, right: 58, zIndex: 700, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+      <div ref={registerCtl} style={{ position: "absolute", top: 12, left: 12, right: 58, zIndex: 700, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
         {/* Search — jump to any street address or parcel APN */}
         <div style={{ display: "flex", gap: 6, width: isMobile ? "100%" : "min(330px, 64vw)" }}>
           <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
@@ -3172,18 +3251,18 @@ function GISTab({ data, update, onStartDeal }) {
         <div style={{ display: "flex", gap: 6, width: isMobile ? "100%" : "min(330px, 64vw)" }}>
           <select value={stateFilter} onChange={e => flyToState(e.target.value)} className="gcb" title="State"
             style={{ flexShrink: 0, width: 72, padding: "8px 8px", borderRadius: 16, border: `1px solid ${T.border}`, background: T.glass, color: T.text, fontSize: 12.5, fontWeight: 800, outline: "none", cursor: "pointer", WebkitAppearance: "none", appearance: "none", textAlign: "center" }}>
-            {["FL","TX","TN","NC","OH","IN","WI","MN","AR","NM"].map(st => <option key={st} value={st} style={{ color: "#111", background: "#fff" }}>{st}</option>)}
+            {["FL","TX","TN","NC","OH","IN","WI","MN","AR","NM","VA","PR","NY","MT","MA","VT","CT"].map(st => <option key={st} value={st} style={{ color: "#111", background: "#fff" }}>{st}</option>)}
           </select>
           <select value={selectedCounty} onChange={e => flyToCounty(e.target.value)} className="gcb" title="County"
             style={{ flex: 1, minWidth: 0, padding: "8px 12px", borderRadius: 16, border: `1px solid ${T.border}`, background: T.glass, color: T.text, fontSize: 12.5, fontWeight: 600, outline: "none", cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
-            <option value="">County… ({countyNames.length})</option>
-            {countyNames.map(name => <option key={name} value={name} style={{ color: "#111", background: "#fff" }}>{name} County</option>)}
+            <option value="">{stateFilter === "PR" ? "Municipio" : stateFilter === "VA" ? "County / City" : "County"}… ({countyNames.length})</option>
+            {countyNames.map(name => <option key={name} value={name} style={{ color: "#111", background: "#fff" }}>{name}{(stateFilter === "PR" || stateFilter === "VA") ? "" : " County"}</option>)}
           </select>
         </div>
       </div>
 
       {/* Data-source / proxy settings */}
-      <button className="gcb" onClick={() => { setSettingsOpen(o => !o); setBasketOpen(false); }} title="Live data source (CORS proxy)" style={{ position: "absolute", top: 12, right: 12, zIndex: 701, width: 38, height: 38, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: (data.settings && data.settings.gisProxy) ? T.accent : T.ctrl, color: (data.settings && data.settings.gisProxy) ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <button ref={registerCtl} className="gcb" onClick={() => { setSettingsOpen(o => !o); setBasketOpen(false); }} title="Live data source (CORS proxy)" style={{ position: "absolute", top: 12, right: 12, zIndex: 701, width: 38, height: 38, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: (data.settings && data.settings.gisProxy) ? T.accent : T.ctrl, color: (data.settings && data.settings.gisProxy) ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
         ⚙
       </button>
 
@@ -3250,7 +3329,7 @@ function GISTab({ data, update, onStartDeal }) {
       )}
 
       {/* Right controls */}
-      <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 700, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div ref={registerCtl} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 700, display: "flex", flexDirection: "column", gap: 6 }}>
         {/* Saved-parcels basket — sits at the top of the rail, just above the compass */}
         <button className="gcb" onClick={() => { setBasketOpen(o => !o); setSettingsOpen(false); }} title="Saved parcels" style={{ position: "relative", width: isMobile ? 36 : 40, height: isMobile ? 36 : 40, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: saved.length ? T.accent : T.ctrl, color: saved.length ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
           ★
@@ -3279,7 +3358,7 @@ function GISTab({ data, update, onStartDeal }) {
       </div>
 
       {/* Lot-lines toggle */}
-      <button className="gcb" onClick={() => { const nv=!showParcels; ctrlRef.current.showParcels = nv; setShowParcels(nv); if(!nv){ parcelLayerRef.current?.clearLayers(); highlightRef.current?.clearLayers(); } else loaderRef.current?.(); }} style={{ position: "absolute", bottom: cardOpen ? "calc(65vh + 10px)" : 14, right: 12, zIndex: 700, padding: "6px 13px", borderRadius: 10, border: `1px solid ${T.ctrlBorder}`, background: showParcels ? T.accent : T.ctrl, color: showParcels ? "#fff" : T.ctrlText, fontSize: 11.5, fontWeight: 700, cursor: "pointer", transition: "bottom .3s ease" }}>
+      <button ref={registerCtl} className="gcb" onClick={() => { const nv=!showParcels; ctrlRef.current.showParcels = nv; setShowParcels(nv); if(!nv){ parcelLayerRef.current?.clearLayers(); highlightRef.current?.clearLayers(); } else loaderRef.current?.(); }} style={{ position: "absolute", bottom: cardOpen ? "calc(65vh + 10px)" : 14, right: 12, zIndex: 700, padding: "6px 13px", borderRadius: 10, border: `1px solid ${T.ctrlBorder}`, background: showParcels ? T.accent : T.ctrl, color: showParcels ? "#fff" : T.ctrlText, fontSize: 11.5, fontWeight: 700, cursor: "pointer", transition: "bottom .3s ease" }}>
         {showParcels ? "Lot Lines ON" : "Lot Lines OFF"}
       </button>
 
