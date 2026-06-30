@@ -2509,10 +2509,11 @@ function applyProxy(proxy, u) {
     : proxy + (proxy.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(u);
 }
 function corsFetch(url, { signal, timeout = 9000, proxy = "" } = {}) {
-  const routes = [(u) => u];                              // direct first — CORS-enabled statewide services (FL/TX/TN) succeed instantly
-  if (proxy) routes.push((u) => applyProxy(proxy, u));    // user's proxy — for non-CORS servers (NC + county fallbacks)
-  routes.push((u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`);
+  const routes = [(u) => u];                              // direct first — CORS-enabled statewide services (FL/TX/TN, Esri-cloud MA/VT/CT) succeed instantly
+  if (proxy) routes.push((u) => applyProxy(proxy, u));    // user's proxy — most reliable for non-CORS state servers (NY/MT/VA/PR + county fallbacks)
+  routes.push((u) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(u)}`);   // public relay (no key, fairly stable)
   routes.push((u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
+  routes.push((u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`);
   return (async () => {
     let lastErr;
     for (const wrap of routes) {
@@ -2530,18 +2531,52 @@ function corsFetch(url, { signal, timeout = 9000, proxy = "" } = {}) {
   })();
 }
 
+// Convert Esri JSON polygon/point features -> GeoJSON. Many state ArcGIS MapServers
+// (e.g. MT, and older installs) don't support f=geojson and silently return nothing,
+// so we fall back to f=json (universally supported) and convert here. Each ring is drawn
+// as its own polygon outline — exact hole nesting doesn't matter for lot lines.
+function esriToGeoJSON(esriFeatures) {
+  return (esriFeatures || []).map((f) => {
+    const g = f.geometry || {};
+    let geometry = null;
+    if (Array.isArray(g.rings) && g.rings.length) {
+      geometry = g.rings.length === 1
+        ? { type: "Polygon", coordinates: g.rings }
+        : { type: "MultiPolygon", coordinates: g.rings.map((r) => [r]) };
+    } else if (typeof g.x === "number") {
+      geometry = { type: "Point", coordinates: [g.x, g.y] };
+    }
+    return geometry ? { type: "Feature", properties: f.attributes || {}, geometry } : null;
+  }).filter(Boolean);
+}
+
+// Run an ArcGIS /query, preferring clean GeoJSON but falling back to Esri JSON + convert.
+// Returns an array of GeoJSON features (possibly empty).
+async function arcgisQuery(serviceUrl, params, { signal, timeout = 9000, proxy = "" } = {}) {
+  const run = async (fmt) => {
+    const qs = new URLSearchParams({ ...params, f: fmt });
+    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, timeout, proxy });
+    return res.json();
+  };
+  try {
+    const j = await run("geojson");
+    if (j && Array.isArray(j.features) && j.features.length) return j.features;   // service supports geojson
+    if (!j || !j.error) { /* empty or non-geojson response — retry as Esri JSON below */ }
+  } catch (_) { /* fall through to Esri JSON */ }
+  try {
+    const j = await run("json");
+    return esriToGeoJSON(j && j.features);
+  } catch (_) { return []; }
+}
+
 // Query ArcGIS parcel at a point
 async function queryArcGISParcel(serviceUrl, lat, lng, proxy = "") {
-  try {
-    const qs = new URLSearchParams({
-      geometry: `${lng},${lat}`, geometryType: "esriGeometryPoint",
-      spatialRel: "esriSpatialRelIntersects", outFields: "*",
-      returnGeometry: "true", inSR: "4326", outSR: "4326", f: "geojson",
-    });
-    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { timeout: 9000, proxy });
-    const json = await res.json();
-    return json.features?.[0] || null;
-  } catch (_) { return null; }
+  const feats = await arcgisQuery(serviceUrl, {
+    geometry: `${lng},${lat}`, geometryType: "esriGeometryPoint",
+    spatialRel: "esriSpatialRelIntersects", outFields: "*",
+    returnGeometry: "true", inSR: "4326", outSR: "4326",
+  }, { timeout: 9000, proxy });
+  return feats[0] || null;
 }
 
 // Nominatim reverse geocode (zoom 18 ≈ house-number level for full street address)
@@ -2580,17 +2615,12 @@ function nearestCounty(st, lat, lng) {
 
 // Query every parcel intersecting the current map bounds (for showing all lot outlines)
 async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = "") {
-  try {
-    const qs = new URLSearchParams({
-      geometry: `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`,
-      geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
-      outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
-      f: "geojson", resultRecordCount: "1500",
-    });
-    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, proxy });
-    const json = await res.json();
-    return json.features || [];
-  } catch (_) { return []; }
+  return arcgisQuery(serviceUrl, {
+    geometry: `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`,
+    geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
+    outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
+    resultRecordCount: "2000",
+  }, { signal, timeout: 22000, proxy });
 }
 
 const STATE_ABBR = { "Florida": "FL", "Texas": "TX", "Tennessee": "TN", "North Carolina": "NC", "Virginia": "VA", "Puerto Rico": "PR", "New York": "NY", "Montana": "MT", "Massachusetts": "MA", "Vermont": "VT", "Connecticut": "CT" };
@@ -3097,9 +3127,8 @@ function GISTab({ data, update, onStartDeal }) {
         if (!svc || !fld) return null;
         try {
           const where = `${fld}='${q.replace(/'/g, "''")}'`;
-          const res = await corsFetch(`${svc}/query?where=${encodeURIComponent(where)}&outFields=*&returnGeometry=true&outSR=4326&f=geojson&resultRecordCount=1`, { timeout: 12000, proxy });
-          const j = await res.json();
-          return (j.features && j.features[0]) ? { st, feat: j.features[0] } : null;
+          const feats = await arcgisQuery(svc, { where, outFields: "*", returnGeometry: "true", outSR: "4326", resultRecordCount: "1" }, { timeout: 12000, proxy });
+          return feats[0] ? { st, feat: feats[0] } : null;
         } catch (_) { return null; }
       }));
       const hit = hits.find(Boolean);
