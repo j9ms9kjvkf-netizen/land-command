@@ -2306,77 +2306,127 @@ const COMP_CONFIG = {
         vacant: ["000","00","010","10","040","40","070","70","099","99"] },
 };
 
-// Comps split into UNIMPROVED (vacant land = offer basis) and IMPROVED (reference).
-// 3 each, matched on acreage, closest + most recent, ≤~1.3mi (prefer ≤1mi). One fast
-// bbox query (no server-side WHERE — slow on 10.8M parcels), everything filtered client-side.
+// Comps rebuilt for LAND, not houses: hold the size bucket + zoning (vacant land) fixed and
+// expand RADIUS first, then the DATE window (12→18→24 mo) — instead of grabbing the nearest
+// stale sale. Sold records are "retail"; the offer is shown as a 30–50% range of that.
 async function fetchComps(lat, lng, subjectAcres, state, proxy) {
   const cfg = COMP_CONFIG[state];
   if (!cfg) return { unsupported: true };
-  const yr = new Date().getFullYear();
-  const mi = 0.8, dlat = mi / 69, dlng = mi / (69 * Math.cos(lat * Math.PI / 180));
+  const now = new Date(), yr = now.getFullYear(), mo = now.getMonth() + 1;
+  const A = subjectAcres > 0 ? subjectAcres : 0;
+
+  // Size bucket drives BOTH the search radius and which sales are comparable — $/ac is wildly
+  // non-linear across sizes, so we never blend buckets. Distance widens with rural-ness.
+  const BUCKETS = [
+    { label: "infill lot (<1 ac)",  lo: 0,  hi: 1,        dists: [0.5, 1] },     // platted / near town
+    { label: "small acreage (1–5)", lo: 1,  hi: 5,        dists: [1, 3] },       // suburban / exurban
+    { label: "mid acreage (5–20)",  lo: 5,  hi: 20,       dists: [3, 5, 10] },   // rural
+    { label: "large acreage (20+)", lo: 20, hi: Infinity, dists: [5, 10] },      // rural / county-wide
+  ];
+  const bucket = A > 0 ? (BUCKETS.find((b) => A >= b.lo && A < b.hi) || BUCKETS[1]) : BUCKETS[1];
+  const queryRadius = bucket.dists[bucket.dists.length - 1];
+
+  // One bounded query: only real sales from the last 3 years within the widest tier, so the
+  // record cap fills with RELEVANT recent solds (not random parcels). Tiering is client-side.
+  const dlat = queryRadius / 69, dlng = queryRadius / (69 * Math.cos(lat * Math.PI / 180));
   const params = new URLSearchParams({
+    where: `${cfg.saleY} >= ${yr - 3} AND ${cfg.saleP} > 2000`,
     geometry: `${lng - dlng},${lat - dlat},${lng + dlng},${lat + dlat}`,
     geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
     outFields: [cfg.addr, cfg.saleP, cfg.saleY, cfg.saleM, cfg.sqft, cfg.use].join(","),
-    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "1500", f: "json",
+    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "2000", f: "json",
   });
   let feats;
   try { const r = await corsFetch(`${cfg.service}/query?${params}`, { timeout: 22000, proxy }); const j = await r.json(); feats = j.features || []; }
   catch (_) { return { timeout: true }; }
-  const A = subjectAcres > 0 ? subjectAcres : 0;
+
+  const ageMonths = (y, m) => (yr - y) * 12 + (mo - (m > 0 ? m : 6));
   const sold = feats.map((ft) => {
     const c = ft.centroid, p = ft.attributes || {};
     if (!c) return null;
-    const acres = sqftToAcres(p[cfg.sqft]), price = parseFloat(p[cfg.saleP]) || 0, y = parseFloat(p[cfg.saleY]) || 0;
-    if (!(acres > 0 && price > 2000 && y >= yr - 5)) return null;
-    return { addr: String(p[cfg.addr] || "").trim(), m: p[cfg.saleM], y, price, acres, ppa: Math.round(price / acres),
+    const acres = sqftToAcres(p[cfg.sqft]), price = parseFloat(p[cfg.saleP]) || 0;
+    const y = parseFloat(p[cfg.saleY]) || 0, m = parseFloat(p[cfg.saleM]) || 0;
+    if (!(acres > 0 && price > 2000 && y > 0)) return null;
+    return { addr: String(p[cfg.addr] || "").trim(), m, y, price, acres, ppa: Math.round(price / acres),
+      age: ageMonths(y, m),
       dist: Math.hypot((c.y - lat) * 69, (c.x - lng) * 69 * Math.cos(lat * Math.PI / 180)),
       vacant: cfg.vacant.includes(String(p[cfg.use] || "").trim()) };
   }).filter(Boolean);
-  // rank: prefer within 1mi, then most recent, then closest
-  const rank = (arr) => arr.slice().sort((a, b) => (a.dist <= 1 ? 0 : 1) - (b.dist <= 1 ? 0 : 1) || b.y - a.y || a.dist - b.dist);
-  const pick3 = (pool) => {
-    const band = A > 0 ? pool.filter((c) => c.acres >= A * 0.5 && c.acres <= A * 2) : pool;
-    let chosen = rank(band).slice(0, 3);
-    if (chosen.length < 3) chosen = chosen.concat(rank(pool.filter((c) => !chosen.includes(c))).slice(0, 3 - chosen.length));
-    const ppas = chosen.filter((c) => c.ppa > 0).map((c) => c.ppa);
-    const avg = ppas.length ? Math.round(ppas.reduce((a, b) => a + b, 0) / ppas.length) : 0;
-    return { comps: chosen, avg, est: A > 0 ? Math.round(avg * A) : 0 };
+
+  const median = (a) => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y), i = s.length >> 1; return s.length % 2 ? s[i] : Math.round((s[i - 1] + s[i]) / 2); };
+  const finalize = (chosen, dmax, months) => {
+    const ppa = median(chosen.filter((c) => c.ppa > 0).map((c) => c.ppa));   // median $/ac — robust to land's skew
+    const retail = A > 0 ? Math.round(ppa * A) : 0;                          // comp-derived retail (sold) value
+    return { comps: chosen, ppa, retail, count: chosen.length, dist: dmax, months,
+      offerLow: retail ? Math.round(retail * 0.30 / 100) * 100 : 0,
+      offerHigh: retail ? Math.round(retail * 0.50 / 100) * 100 : 0 };
   };
-  const unimproved = pick3(sold.filter((c) => c.vacant));
-  const improved = pick3(sold.filter((c) => !c.vacant));
-  const dists = [...unimproved.comps, ...improved.comps].map((c) => c.dist);
-  return { improved, unimproved, subjectAcres: A,
-    radius: dists.length ? Math.min(2, Math.max(1, Math.ceil(Math.max(...dists) * 10) / 10)) : 1 };
+
+  // Expanding tiers: same bucket + same zoning; sweep radius fully at 12mo before bumping the
+  // date window. Rank by closest acreage, then distance, then recency. Target 3–5 solds.
+  const DATE_STEPS = [12, 18, 24];
+  const rank = (arr) => arr.slice().sort((a, b) =>
+    Math.abs(Math.log((a.acres || 1) / (A || a.acres || 1))) - Math.abs(Math.log((b.acres || 1) / (A || b.acres || 1)))
+    || a.dist - b.dist || a.age - b.age);
+  const pickTiered = (pool0) => {
+    const pool = pool0.filter((c) => c.acres >= bucket.lo && c.acres < bucket.hi);
+    let best = [], bd = bucket.dists[0], bm = 12;
+    for (const months of DATE_STEPS) {
+      for (const dmax of bucket.dists) {
+        const cands = pool.filter((c) => c.dist <= dmax && c.age <= months);
+        if (cands.length > best.length) { best = cands; bd = dmax; bm = months; }
+        if (cands.length >= 3) return finalize(rank(cands).slice(0, 5), dmax, months);
+      }
+    }
+    return finalize(rank(best).slice(0, 5), bd, bm);
+  };
+
+  const unimproved = pickTiered(sold.filter((c) => c.vacant));
+  const improved = pickTiered(sold.filter((c) => !c.vacant));
+  return { improved, unimproved, subjectAcres: A, bucket: bucket.label,
+    radius: Math.max(unimproved.dist || 0, improved.dist || 0) || bucket.dists[0],
+    months: Math.max(unimproved.months || 12, improved.months || 12) };
 }
 
-// Side-by-side comp columns — unimproved (offer basis) vs improved (reference). pal = palette.
+// Side-by-side comp columns — Offer (30–50% of retail, from vacant-land solds) vs Retail reference.
 function CompsColumns({ res, pal }) {
+  const money = (n) => "$" + Math.round(n || 0).toLocaleString();
   const col = (label, sub, data, hot) => (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: hot ? pal.accent : pal.dim, marginBottom: 5 }}>{label}</div>
       <div style={{ background: hot ? pal.hot : pal.panel, border: `1px solid ${hot ? pal.accent : pal.line}`, borderRadius: 8, padding: "7px 9px", marginBottom: 6 }}>
         <div style={{ fontSize: 8.5, color: pal.dim, textTransform: "uppercase", letterSpacing: ".04em" }}>{sub}</div>
-        <div style={{ fontSize: 17, fontWeight: 800, color: hot ? pal.accent : pal.text, lineHeight: 1.1 }}>{data.est ? "$" + data.est.toLocaleString() : "—"}</div>
-        <div className="lc-mono" style={{ fontSize: 9.5, color: pal.dim }}>avg ${data.avg.toLocaleString()}/ac</div>
+        {hot ? (
+          <>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: pal.accent, lineHeight: 1.15 }}>{data.offerHigh ? `${money(data.offerLow)}–${money(data.offerHigh)}` : "—"}</div>
+            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>retail {data.retail ? money(data.retail) : "—"} · {data.ppa ? money(data.ppa) + "/ac" : "—"}</div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: pal.text, lineHeight: 1.15 }}>{data.retail ? money(data.retail) : "—"}</div>
+            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>{data.ppa ? money(data.ppa) + "/ac" : "—"}</div>
+          </>
+        )}
       </div>
       <div style={{ display: "grid", gap: 4 }}>
         {data.comps.length ? data.comps.map((c, i) => (
           <div key={i} style={{ lineHeight: 1.25 }}>
             <div style={{ fontSize: 10.5, color: pal.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.addr || "Vacant parcel"}</div>
-            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>{c.m}/{c.y} · {c.acres.toFixed(2)}ac · {c.dist.toFixed(1)}mi · ${Math.round(c.price / 1000)}k</div>
+            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>{c.m ? c.m + "/" : ""}{c.y} · {c.acres.toFixed(2)}ac · {c.dist.toFixed(1)}mi · ${Math.round(c.price / 1000)}k</div>
           </div>
-        )) : <div style={{ fontSize: 10.5, color: pal.dim }}>None found nearby</div>}
+        )) : <div style={{ fontSize: 10.5, color: pal.dim }}>No solds in range</div>}
       </div>
     </div>
   );
   return (
     <div>
       <div style={{ display: "flex", gap: 10 }}>
-        {col("Unimproved · Land", "Your offer basis", res.unimproved, true)}
-        {col("Improved · Reference", "If a home were built", res.improved, false)}
+        {col("Your Offer · Land", "30–50% of retail", res.unimproved, true)}
+        {col("Retail · If built", "Reference", res.improved, false)}
       </div>
-      <div style={{ fontSize: 8.5, color: pal.dim, marginTop: 7, lineHeight: 1.45 }}>3 closest recent sales ≤{res.radius}mi, matched on acreage. Unimproved = land offer; improved = value if built — use if they push back on price.</div>
+      <div style={{ fontSize: 8.5, color: pal.dim, marginTop: 7, lineHeight: 1.45 }}>
+        {res.bucket ? res.bucket + " · " : ""}{res.unimproved.count || 0} vacant sold ≤{res.unimproved.dist || res.radius}mi, last {res.unimproved.months || 12}mo (median $/ac). Offer = 30–50% of comp-derived retail. Widen radius → date, never size/zoning.
+      </div>
     </div>
   );
 }
