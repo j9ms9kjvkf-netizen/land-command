@@ -2334,10 +2334,10 @@ async function fetchComps(lat, lng, subjectAcres, state, proxy) {
     geometry: `${lng - dlng},${lat - dlat},${lng + dlng},${lat + dlat}`,
     geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
     outFields: [cfg.addr, cfg.saleP, cfg.saleY, cfg.saleM, cfg.sqft, cfg.use].join(","),
-    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "2000", f: "json",
+    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "1500", f: "json",
   });
   let feats;
-  try { const r = await corsFetch(`${cfg.service}/query?${params}`, { timeout: 22000, proxy }); const j = await r.json(); feats = j.features || []; }
+  try { const r = await corsFetch(`${cfg.service}/query?${params}`, { timeout: 15000, proxy }); const j = await r.json(); feats = j.features || []; }
   catch (_) { return { timeout: true }; }
 
   const ageMonths = (y, m) => (yr - y) * 12 + (mo - (m > 0 ? m : 6));
@@ -2502,25 +2502,40 @@ function applyProxy(proxy, u) {
     : proxy + (proxy.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(u);
 }
 function corsFetch(url, { signal, timeout = 9000, proxy = "" } = {}) {
-  const routes = [(u) => u];                              // direct first — CORS-enabled statewide services (FL/TX/TN) succeed instantly
-  if (proxy) routes.push((u) => applyProxy(proxy, u));    // user's proxy — for non-CORS servers (NC + county fallbacks)
+  // STAGGER-RACE instead of one-at-a-time. Sequential fallbacks meant a non-CORS state
+  // (NC/IN/AR/MN) paid for every failure in order — worst case 25s+. Now: the direct
+  // request fires immediately (CORS-enabled hosts win in <1s and no relay is bothered);
+  // if it hasn't won within 700ms, the user's proxy + public relays all fire IN PARALLEL
+  // and the first OK response wins. Losers are aborted.
+  const routes = [(u) => u];
+  if (proxy) routes.push((u) => applyProxy(proxy, u));    // user's proxy — most reliable for non-CORS servers
   routes.push((u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`);
   routes.push((u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
-  return (async () => {
-    let lastErr;
-    for (const wrap of routes) {
-      if (signal && signal.aborted) throw new Error("aborted");
-      try {
-        const res = await fetch(wrap(url), { signal: signal || AbortSignal.timeout(timeout) });
-        if (res.ok) return res;
-        lastErr = new Error("HTTP " + res.status);
-      } catch (e) {
-        lastErr = e;
-        if (signal && signal.aborted) throw e;   // caller cancelled (stale request)
-      }
-    }
-    throw lastErr || new Error("all CORS routes failed");
-  })();
+  return new Promise((resolve, reject) => {
+    let settled = false, pending = routes.length, lastErr;
+    const ctls = [];
+    const abortAll = () => ctls.forEach((c) => { try { c.abort(); } catch (_) {} });
+    if (signal) signal.addEventListener("abort", () => {
+      if (!settled) { settled = true; abortAll(); reject(new Error("aborted")); }
+    }, { once: true });
+    const fire = (wrap) => {
+      if (settled) { pending--; return; }
+      const ctl = new AbortController(); ctls.push(ctl);
+      const timer = setTimeout(() => ctl.abort(), timeout);
+      fetch(wrap(url), { signal: ctl.signal })
+        .then((res) => {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          if (!settled) { settled = true; abortAll(); resolve(res); }
+        })
+        .catch((e) => { lastErr = e; })
+        .finally(() => {
+          clearTimeout(timer);
+          if (--pending <= 0 && !settled) { settled = true; reject(lastErr || new Error("all CORS routes failed")); }
+        });
+    };
+    fire(routes[0]);
+    if (routes.length > 1) setTimeout(() => routes.slice(1).forEach(fire), 700);
+  });
 }
 
 // Query ArcGIS parcel at a point
@@ -2579,6 +2594,9 @@ async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = ""
       geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
       outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
       f: "geojson", resultRecordCount: "1500",
+      // ~1m server-side generalization + 6-decimal coords: invisible at z15–18, but cuts the
+      // geometry payload (the bulk of every lot-lines fetch) by 60–80% -> faster pan/zoom.
+      maxAllowableOffset: "0.00001", geometryPrecision: "6",
     });
     const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, proxy });
     const json = await res.json();
@@ -2935,44 +2953,61 @@ function GISTab({ data, update, onStartDeal }) {
           }),
         }).addTo(map);
 
+        const stGuess = ctrlRef.current.stateFilter || null;
+        const same = (prev) => prev && prev.lat === lat && prev.lng === lng;
+
+        // Direct lot click: owner/APN/acreage are ALREADY on the clicked feature — show the
+        // card and kick off comps IMMEDIATELY. The geocode (address/county/links) merges in
+        // when it returns; it never blocks the card anymore.
+        if (presetFeat) {
+          if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(presetFeat); }
+          if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
+          const pf = extractParcelFields(presetFeat.properties);
+          if (mounted) { setSelected({ lat, lng, zip: "", county: "", state: stGuess, urls: {}, fullAddress: "", fields: pf, hasFeat: true }); setLoading(false); }
+          loadComps(lat, lng, stGuess, pf);
+        }
+
+        // Empty-area click: query the parcel record CONCURRENTLY with the geocode, using the
+        // current state's service (clicking outside the selected state is the rare case,
+        // corrected below once the geocode names the true state).
+        let featP = null;
+        if (!presetFeat && stGuess && GIS_STATE_PARCELS[stGuess] && ctrlRef.current.showParcels) {
+          featP = queryArcGISParcel(GIS_STATE_PARCELS[stGuess], lat, lng, ctrlRef.current.proxy);
+        }
+
         try {
           const geo = await reverseGeocode(lat, lng, 18);
           const stateName = geo?.address?.state || "";
-          const st = STATE_ABBR[stateName] || ctrlRef.current.stateFilter || null;
+          const st = STATE_ABBR[stateName] || stGuess || null;
           const rawCounty = normCounty(geo?.address?.county || geo?.address?.state_district || "");
           const countyData = st ? GIS_COUNTIES[st]?.[rawCounty] : null;
-          const serviceUrl = (st && GIS_STATE_PARCELS[st]) || (st ? GIS_PARCEL_SERVICES[`${st}_${rawCounty}`] : null);
-          const urls = getCountyUrls(st || ctrlRef.current.stateFilter, rawCounty, countyData?.slug || "");
-          const fullAddress = buildAddress(geo);
-          const base = { lat, lng, zip: geo?.address?.postcode || "", county: rawCounty, state: st, urls, fullAddress };
+          const urls = getCountyUrls(st || stGuess, rawCounty, countyData?.slug || "");
+          const base = { zip: geo?.address?.postcode || "", county: rawCounty, state: st, urls, fullAddress: buildAddress(geo) };
 
-          // Direct lot click: we already have the geometry — illuminate + show immediately
           if (presetFeat) {
-            if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(presetFeat); }
-            if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
-            const pf = extractParcelFields(presetFeat.properties);
-            if (mounted) { setSelected({ ...base, fields: pf, hasFeat: true }); setLoading(false); }
-            loadComps(lat, lng, st, pf);
+            if (mounted) setSelected(prev => same(prev) ? { ...prev, ...base } : prev);
+            if (st !== stGuess) loadComps(lat, lng, st, extractParcelFields(presetFeat.properties));  // guess was wrong — redo comps under the true state
             return;
           }
 
-          // Empty-area click: show the card with the address NOW; parcel record (CORS-proxied,
-          // can be slow/unavailable) fills in asynchronously without blocking the card.
-          if (mounted) { setSelected({ ...base, fields: {}, hasFeat: false }); setLoading(false); }
+          // Empty-area: show the card with the address now; parcel record fills in as it lands
+          if (mounted) { setSelected({ lat, lng, ...base, fields: {}, hasFeat: false }); setLoading(false); }
+          let feat = null;
+          if (featP && st === stGuess) feat = await featP;
+          else {
+            const serviceUrl = (st && GIS_STATE_PARCELS[st]) || (st ? GIS_PARCEL_SERVICES[`${st}_${rawCounty}`] : null);
+            if (serviceUrl && ctrlRef.current.showParcels) feat = await queryArcGISParcel(serviceUrl, lat, lng, ctrlRef.current.proxy);
+          }
           let qf = {};
-          if (serviceUrl && ctrlRef.current.showParcels) {
-            const feat = await queryArcGISParcel(serviceUrl, lat, lng, ctrlRef.current.proxy);
-            if (feat && mounted) {
-              if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(feat); }
-              if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
-              qf = extractParcelFields(feat.properties);
-              setSelected(prev => (prev && prev.lat === lat && prev.lng === lng)
-                ? { ...prev, fields: qf, hasFeat: true } : prev);
-            }
+          if (feat && mounted) {
+            if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(feat); }
+            if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
+            qf = extractParcelFields(feat.properties);
+            setSelected(prev => same(prev) ? { ...prev, fields: qf, hasFeat: true } : prev);
           }
           loadComps(lat, lng, st, qf);
         } catch (_) {
-          if (mounted) { setError("Could not load parcel data — check your connection."); setLoading(false); }
+          if (mounted) { if (!presetFeat) setError("Could not load parcel data — check your connection."); setLoading(false); }
         }
       }
 
@@ -3011,7 +3046,7 @@ function GISTab({ data, update, onStartDeal }) {
 
       function scheduleParcelLoad() {
         if (moveTimerRef.current) clearTimeout(moveTimerRef.current);
-        moveTimerRef.current = setTimeout(loadParcelsInView, 450);
+        moveTimerRef.current = setTimeout(loadParcelsInView, 300);
       }
 
       map.on("zoomend", () => { if (mounted) setZoom(map.getZoom()); });
