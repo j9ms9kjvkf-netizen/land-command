@@ -2184,6 +2184,16 @@ const _GIS_RAW = {
 // Build county lookup map
 const GIS_COUNTIES = {};
 
+/* Expansion-state counties (centroids from US Census Gazetteer) — merged into GIS_COUNTIES */
+const GIS_COUNTIES_MORE = {
+  OH: {"Adams":{lat:38.8345,lng:-83.4781,slug:"adams"},"Allen":{lat:40.7716,lng:-84.1061,slug:"allen"},"Ashland":{lat:40.8433,lng:-82.2701,slug:"ashland"},"Ashtabula":{lat:41.9066,lng:-80.7456,slug:"ashtabula"},"Athens":{lat:39.3328,lng:-82.0459,slug:"athens"},"Auglaize":{lat:40.5613,lng:-84.224,slug:"auglaize"},"Belmont":{lat:40.0177,lng:-80.9677,slug:"belmont"},"Brown":{lat:38.9314,lng:-83.8668,slug:"brown"},"Butler":{lat:39.4397,lng:-84.5657,slug:"butler"},"Carroll":{lat:40.5799,lng:-81.0908,slug:"carroll"},"Champaign":{lat:40.1328,lng:-83.7676,slug:"champaign"},"Clark":{lat:39.917,lng:-83.7837,slug:"clark"},"Clermont":{lat:39.0521,lng:-84.1495,slug:"clermont"},"Clinton":{lat:39.4167,lng:-83.8046,slug:"clinton"},"Columbiana":{lat:40.7701,lng:-80.7785,slug:"columbiana"},"Coshocton":{lat:40.2967,lng:-81.9301,slug:"coshocton"},"Crawford":{lat:40.8485,lng:-82.9248,slug:"crawford"},"Cuyahoga":{lat:41.555,lng:-81.605,slug:"cuyahoga"},"Darke":{lat:40.1315,lng:-84.6212,slug:"darke"},"Defiance":{lat:41.3217,lng:-84.4864,slug:"defiance"},"Delaware":{lat:40.2789,lng:-83.0075,slug:"delaware"},"Erie":{lat:41.3941,lng:-82.5868,slug:"erie"},"Fairfield":{lat:39.7477,lng:-82.6267,slug:"fairfield"},"Fayette":{lat:39.5552,lng:-83.4619,slug:"fayette"},"Franklin":{lat:39.9699,lng:-83.0091,slug:"franklin"},"Fulton":{lat:41.5973,lng:-84.1243,slug:"fulton"},"Gallia":{lat:38.817,lng:-82.3017,slug:"gallia"},"Geauga":{lat:41.4993,lng:-81.1735,slug:"geauga"},"Greene":{lat:39.6875,lng:-83.8949,slug:"greene"},"Guernsey":{lat:40.0567,lng:-81.4979,slug:"guernsey"},"Hamilton":{lat:39.1969,lng:-84.5442,slug:"hamilton"},"Hancock":{lat:41.0002,lng:-83.6659,slug:"hancock"},"Hardin":{lat:40.6604,lng:-83.6641,slug:"hardin"},"Harrison":{lat:40.2923,lng:-81.0916,slug:"harrison"},"Henry":{lat:41.3316,lng:-84.0689,slug:"henry"},"Highland":{lat:39.1844,lng:-83.6014,slug:"highland"},"Hocking":{lat:39.4903,lng:-82.4834,slug:"hocking"},"Holmes":{lat:40.5656,lng:-81.93,slug:"holmes"},"Huron":{lat:41.1451,lng:-82.5946,slug:"huron"},"Jackson":{lat:39.0135,lng:-82.6141,slug:"jackson"},"Jefferson":{lat:40.3994,lng:-80.7635,slug:"jefferson"},"Knox":{lat:40.4036,lng:-82.4224,slug:"knox"},"Lake":{lat:41.7781,lng:-81.1973,slug:"lake"},"Lawrence":{lat:38.6039,lng:-82.5172,slug:"lawrence"},"Licking":{lat:40.0915,lng:-82.4834,slug:"licking"},"Logan":{lat:40.3876,lng:-83.7663,slug:"logan"},"Lorain":{lat:41.4388,lng:-82.1797,slug:"lorain"},"Lucas":{lat:41.6823,lng:-83.4689,slug:"lucas"},"Madison":{lat:39.8966,lng:-83.4009,slug:"madison"},"Mahoning":{lat:41.0109,lng:-80.7704,slug:"mahoning"},"Marion":{lat:40.588,lng:-83.1688,slug:"marion"},"Medina":{lat:41.1162,lng:-81.8998,slug:"medina"},"Meigs":{lat:39.0898,lng:-82.0284,slug:"meigs"},"Mercer":{lat:40.5353,lng:-84.6321,slug:"mercer"},"Miami":{lat:40.0533,lng:-84.2284,slug:"miami"},"Monroe":{lat:39.7263,lng:-81.091,slug:"monroe"},"Montgomery":{lat:39.7537,lng:-84.2906,slug:"montgomery"},"Morgan":{lat:39.6249,lng:-81.8617,slug:"morgan"},"Morrow":{lat:40.5253,lng:-82.7977,slug:"morrow"},"Muskingum":{lat:39.966,lng:-81.9435,slug:"muskingum"},"Noble":{lat:39.7672,lng:-81.4525,slug:"noble"},"Ottawa":{lat:41.5455,lng:-83.0126,slug:"ottawa"},"Paulding":{lat:41.1189,lng:-84.5821,slug:"paulding"},"Perry":{lat:39.7432,lng:-82.238,slug:"perry"},"Pickaway":{lat:39.6489,lng:-83.0528,slug:"pickaway"},"Pike":{lat:39.0713,lng:-83.0529,slug:"pike"},"Portage":{lat:41.169,lng:-81.197,slug:"portage"},"Preble":{lat:39.7388,lng:-84.6448,slug:"preble"},"Putnam":{lat:41.0245,lng:-84.1299,slug:"putnam"},"Richland":{lat:40.7742,lng:-82.5428,slug:"richland"},"Ross":{lat:39.3239,lng:-83.0595,slug:"ross"},"Sandusky":{lat:41.3553,lng:-83.1428,slug:"sandusky"},"Scioto":{lat:38.8149,lng:-82.9987,slug:"scioto"},"Seneca":{lat:41.12,lng:-83.1275,slug:"seneca"},"Shelby":{lat:40.3367,lng:-84.2041,slug:"shelby"},"Stark":{lat:40.8141,lng:-81.3657,slug:"stark"},"Summit":{lat:41.1218,lng:-81.5349,slug:"summit"},"Trumbull":{lat:41.3064,lng:-80.7704,slug:"trumbull"},"Tuscarawas":{lat:40.4474,lng:-81.4712,slug:"tuscarawas"},"Union":{lat:40.2959,lng:-83.367,slug:"union"},"Van Wert":{lat:40.8555,lng:-84.5858,slug:"vanwert"},"Vinton":{lat:39.252,lng:-82.486,slug:"vinton"},"Warren":{lat:39.4257,lng:-84.1699,slug:"warren"},"Washington":{lat:39.4507,lng:-81.4906,slug:"washington"},"Wayne":{lat:40.8297,lng:-81.8872,slug:"wayne"},"Williams":{lat:41.565,lng:-84.5843,slug:"williams"},"Wood":{lat:41.3602,lng:-83.6227,slug:"wood"},"Wyandot":{lat:40.8398,lng:-83.3137,slug:"wyandot"}},
+  IN: {"Adams":{lat:40.7457,lng:-84.9361,slug:"adams"},"Allen":{lat:41.0919,lng:-85.0718,slug:"allen"},"Bartholomew":{lat:39.2058,lng:-85.898,slug:"bartholomew"},"Benton":{lat:40.6009,lng:-87.3148,slug:"benton"},"Blackford":{lat:40.4727,lng:-85.3237,slug:"blackford"},"Boone":{lat:40.0509,lng:-86.469,slug:"boone"},"Brown":{lat:39.1951,lng:-86.2301,slug:"brown"},"Carroll":{lat:40.585,lng:-86.5651,slug:"carroll"},"Cass":{lat:40.7538,lng:-86.3552,slug:"cass"},"Clark":{lat:38.4762,lng:-85.7111,slug:"clark"},"Clay":{lat:39.3939,lng:-87.1159,slug:"clay"},"Clinton":{lat:40.3059,lng:-86.4776,slug:"clinton"},"Crawford":{lat:38.2894,lng:-86.4409,slug:"crawford"},"Daviess":{lat:38.6961,lng:-87.0769,slug:"daviess"},"DeKalb":{lat:41.3968,lng:-85.0027,slug:"dekalb"},"Dearborn":{lat:39.1409,lng:-84.9759,slug:"dearborn"},"Decatur":{lat:39.306,lng:-85.4998,slug:"decatur"},"Delaware":{lat:40.2275,lng:-85.3993,slug:"delaware"},"Dubois":{lat:38.3733,lng:-86.8734,slug:"dubois"},"Elkhart":{lat:41.6007,lng:-85.864,slug:"elkhart"},"Fayette":{lat:39.6397,lng:-85.185,slug:"fayette"},"Floyd":{lat:38.3181,lng:-85.9118,slug:"floyd"},"Fountain":{lat:40.1212,lng:-87.2349,slug:"fountain"},"Franklin":{lat:39.4098,lng:-85.067,slug:"franklin"},"Fulton":{lat:41.0504,lng:-86.265,slug:"fulton"},"Gibson":{lat:38.3174,lng:-87.5805,slug:"gibson"},"Grant":{lat:40.5158,lng:-85.6549,slug:"grant"},"Greene":{lat:39.0471,lng:-87.0048,slug:"greene"},"Hamilton":{lat:40.0535,lng:-86.0217,slug:"hamilton"},"Hancock":{lat:39.8225,lng:-85.7732,slug:"hancock"},"Harrison":{lat:38.1865,lng:-86.1038,slug:"harrison"},"Hendricks":{lat:39.769,lng:-86.5099,slug:"hendricks"},"Henry":{lat:39.9296,lng:-85.3974,slug:"henry"},"Howard":{lat:40.4835,lng:-86.1141,slug:"howard"},"Huntington":{lat:40.8264,lng:-85.4786,slug:"huntington"},"Jackson":{lat:38.912,lng:-86.0425,slug:"jackson"},"Jasper":{lat:41.0177,lng:-87.1188,slug:"jasper"},"Jay":{lat:40.435,lng:-85.0023,slug:"jay"},"Jefferson":{lat:38.7836,lng:-85.4401,slug:"jefferson"},"Jennings":{lat:38.9962,lng:-85.6281,slug:"jennings"},"Johnson":{lat:39.4961,lng:-86.0943,slug:"johnson"},"Knox":{lat:38.6884,lng:-87.4204,slug:"knox"},"Kosciusko":{lat:41.2443,lng:-85.8616,slug:"kosciusko"},"LaGrange":{lat:41.6425,lng:-85.4278,slug:"lagrange"},"LaPorte":{lat:41.549,lng:-86.7447,slug:"laporte"},"Lake":{lat:41.4722,lng:-87.3743,slug:"lake"},"Lawrence":{lat:38.8398,lng:-86.4878,slug:"lawrence"},"Madison":{lat:40.1662,lng:-85.7225,slug:"madison"},"Marion":{lat:39.783,lng:-86.1358,slug:"marion"},"Marshall":{lat:41.325,lng:-86.269,slug:"marshall"},"Martin":{lat:38.7053,lng:-86.8018,slug:"martin"},"Miami":{lat:40.7729,lng:-86.0443,slug:"miami"},"Monroe":{lat:39.1607,lng:-86.5233,slug:"monroe"},"Montgomery":{lat:40.0403,lng:-86.8927,slug:"montgomery"},"Morgan":{lat:39.4826,lng:-86.4475,slug:"morgan"},"Newton":{lat:40.9624,lng:-87.4022,slug:"newton"},"Noble":{lat:41.4047,lng:-85.4173,slug:"noble"},"Ohio":{lat:38.9405,lng:-84.9643,slug:"ohio"},"Orange":{lat:38.5474,lng:-86.4893,slug:"orange"},"Owen":{lat:39.3173,lng:-86.8388,slug:"owen"},"Parke":{lat:39.7743,lng:-87.197,slug:"parke"},"Perry":{lat:38.0814,lng:-86.6265,slug:"perry"},"Pike":{lat:38.398,lng:-87.2325,slug:"pike"},"Porter":{lat:41.5099,lng:-87.0713,slug:"porter"},"Posey":{lat:38.0276,lng:-87.8687,slug:"posey"},"Pulaski":{lat:41.0453,lng:-86.6925,slug:"pulaski"},"Putnam":{lat:39.6655,lng:-86.8534,slug:"putnam"},"Randolph":{lat:40.1641,lng:-85.0058,slug:"randolph"},"Ripley":{lat:39.1002,lng:-85.2605,slug:"ripley"},"Rush":{lat:39.6224,lng:-85.4665,slug:"rush"},"Scott":{lat:38.6794,lng:-85.7519,slug:"scott"},"Shelby":{lat:39.5241,lng:-85.7922,slug:"shelby"},"Spencer":{lat:38.0097,lng:-87.0104,slug:"spencer"},"St. Joseph":{lat:41.6177,lng:-86.288,slug:"stjoseph"},"Starke":{lat:41.2845,lng:-86.6446,slug:"starke"},"Steuben":{lat:41.6435,lng:-85.0024,slug:"steuben"},"Sullivan":{lat:39.0892,lng:-87.4158,slug:"sullivan"},"Switzerland":{lat:38.8259,lng:-85.0297,slug:"switzerland"},"Tippecanoe":{lat:40.3891,lng:-86.8936,slug:"tippecanoe"},"Tipton":{lat:40.3102,lng:-86.0562,slug:"tipton"},"Union":{lat:39.6231,lng:-84.9251,slug:"union"},"Vanderburgh":{lat:38.0201,lng:-87.5862,slug:"vanderburgh"},"Vermillion":{lat:39.854,lng:-87.4621,slug:"vermillion"},"Vigo":{lat:39.4309,lng:-87.391,slug:"vigo"},"Wabash":{lat:40.8437,lng:-85.7952,slug:"wabash"},"Warren":{lat:40.3525,lng:-87.3752,slug:"warren"},"Warrick":{lat:38.0977,lng:-87.272,slug:"warrick"},"Washington":{lat:38.6006,lng:-86.1048,slug:"washington"},"Wayne":{lat:39.8631,lng:-85.0067,slug:"wayne"},"Wells":{lat:40.7355,lng:-85.2133,slug:"wells"},"White":{lat:40.751,lng:-86.8643,slug:"white"},"Whitley":{lat:41.1364,lng:-85.5019,slug:"whitley"}},
+  WI: {"Adams":{lat:43.9738,lng:-89.7672,slug:"adams"},"Ashland":{lat:46.5444,lng:-90.6797,slug:"ashland"},"Barron":{lat:45.4372,lng:-91.8529,slug:"barron"},"Bayfield":{lat:46.6342,lng:-91.1773,slug:"bayfield"},"Brown":{lat:44.474,lng:-87.9961,slug:"brown"},"Buffalo":{lat:44.3856,lng:-91.7613,slug:"buffalo"},"Burnett":{lat:45.8669,lng:-92.3757,slug:"burnett"},"Calumet":{lat:44.0784,lng:-88.2121,slug:"calumet"},"Chippewa":{lat:45.0691,lng:-91.2835,slug:"chippewa"},"Clark":{lat:44.7393,lng:-90.61,slug:"clark"},"Columbia":{lat:43.4719,lng:-89.3305,slug:"columbia"},"Crawford":{lat:43.2428,lng:-90.9352,slug:"crawford"},"Dane":{lat:43.0675,lng:-89.4179,slug:"dane"},"Dodge":{lat:43.4296,lng:-88.7019,slug:"dodge"},"Door":{lat:45.0934,lng:-87.0487,slug:"door"},"Douglas":{lat:46.4632,lng:-91.8925,slug:"douglas"},"Dunn":{lat:44.9478,lng:-91.8976,slug:"dunn"},"Eau Claire":{lat:44.7264,lng:-91.2864,slug:"eauclaire"},"Florence":{lat:45.8718,lng:-88.407,slug:"florence"},"Fond du Lac":{lat:43.7547,lng:-88.4933,slug:"fonddulac"},"Forest":{lat:45.6669,lng:-88.7733,slug:"forest"},"Grant":{lat:42.87,lng:-90.6942,slug:"grant"},"Green":{lat:42.6755,lng:-89.6051,slug:"green"},"Green Lake":{lat:43.7802,lng:-88.9704,slug:"greenlake"},"Iowa":{lat:43.001,lng:-90.1337,slug:"iowa"},"Iron":{lat:46.3265,lng:-90.2613,slug:"iron"},"Jackson":{lat:44.3246,lng:-90.7995,slug:"jackson"},"Jefferson":{lat:43.0138,lng:-88.774,slug:"jefferson"},"Juneau":{lat:43.9328,lng:-90.114,slug:"juneau"},"Kenosha":{lat:42.5875,lng:-87.88,slug:"kenosha"},"Kewaunee":{lat:44.6057,lng:-87.448,slug:"kewaunee"},"La Crosse":{lat:43.9082,lng:-91.1118,slug:"lacrosse"},"Lafayette":{lat:42.6556,lng:-90.1303,slug:"lafayette"},"Langlade":{lat:45.2549,lng:-89.0671,slug:"langlade"},"Lincoln":{lat:45.3331,lng:-89.7322,slug:"lincoln"},"Manitowoc":{lat:44.1561,lng:-87.5774,slug:"manitowoc"},"Marathon":{lat:44.898,lng:-89.7578,slug:"marathon"},"Marinette":{lat:45.3469,lng:-87.9912,slug:"marinette"},"Marquette":{lat:43.8261,lng:-89.4091,slug:"marquette"},"Menominee":{lat:44.9913,lng:-88.6693,slug:"menominee"},"Milwaukee":{lat:42.9126,lng:-87.8623,slug:"milwaukee"},"Monroe":{lat:43.9452,lng:-90.62,slug:"monroe"},"Oconto":{lat:44.9966,lng:-88.2065,slug:"oconto"},"Oneida":{lat:45.7162,lng:-89.5345,slug:"oneida"},"Outagamie":{lat:44.4182,lng:-88.465,slug:"outagamie"},"Ozaukee":{lat:43.5018,lng:-87.8476,slug:"ozaukee"},"Pepin":{lat:44.6274,lng:-91.8349,slug:"pepin"},"Pierce":{lat:44.7253,lng:-92.4263,slug:"pierce"},"Polk":{lat:45.462,lng:-92.4471,slug:"polk"},"Portage":{lat:44.4762,lng:-89.4981,slug:"portage"},"Price":{lat:45.6791,lng:-90.3597,slug:"price"},"Racine":{lat:42.7804,lng:-87.7716,slug:"racine"},"Richland":{lat:43.3762,lng:-90.4357,slug:"richland"},"Rock":{lat:42.6699,lng:-89.0753,slug:"rock"},"Rusk":{lat:45.4727,lng:-91.1367,slug:"rusk"},"Sauk":{lat:43.428,lng:-89.9433,slug:"sauk"},"Sawyer":{lat:45.865,lng:-91.1471,slug:"sawyer"},"Shawano":{lat:44.7896,lng:-88.7558,slug:"shawano"},"Sheboygan":{lat:43.7387,lng:-87.7315,slug:"sheboygan"},"St. Croix":{lat:45.029,lng:-92.4473,slug:"stcroix"},"Taylor":{lat:45.2117,lng:-90.5049,slug:"taylor"},"Trempealeau":{lat:44.303,lng:-91.3589,slug:"trempealeau"},"Vernon":{lat:43.5994,lng:-90.822,slug:"vernon"},"Vilas":{lat:46.0498,lng:-89.5013,slug:"vilas"},"Walworth":{lat:42.6681,lng:-88.5417,slug:"walworth"},"Washburn":{lat:45.8925,lng:-91.7964,slug:"washburn"},"Washington":{lat:43.3912,lng:-88.2329,slug:"washington"},"Waukesha":{lat:43.0184,lng:-88.3042,slug:"waukesha"},"Waupaca":{lat:44.478,lng:-88.967,slug:"waupaca"},"Waushara":{lat:44.1128,lng:-89.2398,slug:"waushara"},"Winnebago":{lat:44.0857,lng:-88.6681,slug:"winnebago"},"Wood":{lat:44.4614,lng:-90.0388,slug:"wood"}},
+  MN: {"Aitkin":{lat:46.6024,lng:-93.4197,slug:"aitkin"},"Anoka":{lat:45.2741,lng:-93.2427,slug:"anoka"},"Becker":{lat:46.9376,lng:-95.7418,slug:"becker"},"Beltrami":{lat:47.8795,lng:-95.005,slug:"beltrami"},"Benton":{lat:45.7012,lng:-94.0014,slug:"benton"},"Big Stone":{lat:45.4199,lng:-96.4022,slug:"bigstone"},"Blue Earth":{lat:44.0337,lng:-94.064,slug:"blueearth"},"Brown":{lat:44.2465,lng:-94.7336,slug:"brown"},"Carlton":{lat:46.6038,lng:-92.671,slug:"carlton"},"Carver":{lat:44.8213,lng:-93.8001,slug:"carver"},"Cass":{lat:46.9517,lng:-94.3337,slug:"cass"},"Chippewa":{lat:45.0286,lng:-95.5641,slug:"chippewa"},"Chisago":{lat:45.5054,lng:-92.9038,slug:"chisago"},"Clay":{lat:46.8984,lng:-96.4949,slug:"clay"},"Clearwater":{lat:47.5759,lng:-95.3711,slug:"clearwater"},"Cook":{lat:47.7586,lng:-90.3443,slug:"cook"},"Cottonwood":{lat:44.0106,lng:-95.1832,slug:"cottonwood"},"Crow Wing":{lat:46.4917,lng:-94.0707,slug:"crowwing"},"Dakota":{lat:44.6709,lng:-93.0625,slug:"dakota"},"Dodge":{lat:44.0207,lng:-92.8694,slug:"dodge"},"Douglas":{lat:45.9368,lng:-95.4622,slug:"douglas"},"Faribault":{lat:43.6765,lng:-93.9472,slug:"faribault"},"Fillmore":{lat:43.6792,lng:-92.0939,slug:"fillmore"},"Freeborn":{lat:43.6742,lng:-93.3503,slug:"freeborn"},"Goodhue":{lat:44.4062,lng:-92.716,slug:"goodhue"},"Grant":{lat:45.9307,lng:-96.0107,slug:"grant"},"Hennepin":{lat:45.0061,lng:-93.4752,slug:"hennepin"},"Houston":{lat:43.667,lng:-91.5016,slug:"houston"},"Hubbard":{lat:47.0956,lng:-94.9133,slug:"hubbard"},"Isanti":{lat:45.5624,lng:-93.2963,slug:"isanti"},"Itasca":{lat:47.4908,lng:-93.6111,slug:"itasca"},"Jackson":{lat:43.6711,lng:-95.1497,slug:"jackson"},"Kanabec":{lat:45.9478,lng:-93.2978,slug:"kanabec"},"Kandiyohi":{lat:45.1527,lng:-95.005,slug:"kandiyohi"},"Kittson":{lat:48.776,lng:-96.7803,slug:"kittson"},"Koochiching":{lat:48.2454,lng:-93.7829,slug:"koochiching"},"Lac qui Parle":{lat:44.9998,lng:-96.1769,slug:"lacquiparle"},"Lake":{lat:47.5171,lng:-91.4117,slug:"lake"},"Lake of the Woods":{lat:48.7681,lng:-94.9046,slug:"lakeofthewoods"},"Le Sueur":{lat:44.3734,lng:-93.7301,slug:"lesueur"},"Lincoln":{lat:44.4082,lng:-96.272,slug:"lincoln"},"Lyon":{lat:44.4092,lng:-95.8473,slug:"lyon"},"Mahnomen":{lat:47.3284,lng:-95.8111,slug:"mahnomen"},"Marshall":{lat:48.3627,lng:-96.3578,slug:"marshall"},"Martin":{lat:43.6772,lng:-94.5471,slug:"martin"},"McLeod":{lat:44.8217,lng:-94.2723,slug:"mcleod"},"Meeker":{lat:45.1232,lng:-94.5273,slug:"meeker"},"Mille Lacs":{lat:45.929,lng:-93.633,slug:"millelacs"},"Morrison":{lat:46.0205,lng:-94.2666,slug:"morrison"},"Mower":{lat:43.6662,lng:-92.7595,slug:"mower"},"Murray":{lat:44.0156,lng:-95.7616,slug:"murray"},"Nicollet":{lat:44.3588,lng:-94.2457,slug:"nicollet"},"Nobles":{lat:43.6777,lng:-95.7631,slug:"nobles"},"Norman":{lat:47.3295,lng:-96.4638,slug:"norman"},"Olmsted":{lat:43.9995,lng:-92.4101,slug:"olmsted"},"Otter Tail":{lat:46.4057,lng:-95.7146,slug:"ottertail"},"Pennington":{lat:48.0692,lng:-96.0377,slug:"pennington"},"Pine":{lat:46.1009,lng:-92.7631,slug:"pine"},"Pipestone":{lat:44.0154,lng:-96.257,slug:"pipestone"},"Polk":{lat:47.7743,lng:-96.4,slug:"polk"},"Pope":{lat:45.5896,lng:-95.4467,slug:"pope"},"Ramsey":{lat:45.0152,lng:-93.1,slug:"ramsey"},"Red Lake":{lat:47.8655,lng:-96.0872,slug:"redlake"},"Redwood":{lat:44.4035,lng:-95.2542,slug:"redwood"},"Renville":{lat:44.7237,lng:-94.9556,slug:"renville"},"Rice":{lat:44.3508,lng:-93.2985,slug:"rice"},"Rock":{lat:43.6696,lng:-96.2632,slug:"rock"},"Roseau":{lat:48.7611,lng:-95.8215,slug:"roseau"},"Scott":{lat:44.6518,lng:-93.5337,slug:"scott"},"Sherburne":{lat:45.4532,lng:-93.7692,slug:"sherburne"},"Sibley":{lat:44.5757,lng:-94.2301,slug:"sibley"},"St. Louis":{lat:47.5786,lng:-92.5146,slug:"stlouis"},"Stearns":{lat:45.5552,lng:-94.6105,slug:"stearns"},"Steele":{lat:44.0153,lng:-93.2205,slug:"steele"},"Stevens":{lat:45.5935,lng:-95.9923,slug:"stevens"},"Swift":{lat:45.2758,lng:-95.6901,slug:"swift"},"Todd":{lat:46.0666,lng:-94.9006,slug:"todd"},"Traverse":{lat:45.7699,lng:-96.4748,slug:"traverse"},"Wabasha":{lat:44.2896,lng:-92.2335,slug:"wabasha"},"Wadena":{lat:46.587,lng:-94.9886,slug:"wadena"},"Waseca":{lat:44.0185,lng:-93.5898,slug:"waseca"},"Washington":{lat:45.0379,lng:-92.8901,slug:"washington"},"Watonwan":{lat:43.9781,lng:-94.6138,slug:"watonwan"},"Wilkin":{lat:46.3623,lng:-96.4767,slug:"wilkin"},"Winona":{lat:43.9814,lng:-91.777,slug:"winona"},"Wright":{lat:45.1751,lng:-93.9664,slug:"wright"},"Yellow Medicine":{lat:44.7157,lng:-95.8628,slug:"yellowmedicine"}},
+  AR: {"Arkansas":{lat:34.2896,lng:-91.3765,slug:"arkansas"},"Ashley":{lat:33.1908,lng:-91.7723,slug:"ashley"},"Baxter":{lat:36.2803,lng:-92.3299,slug:"baxter"},"Benton":{lat:36.3378,lng:-94.2563,slug:"benton"},"Boone":{lat:36.3043,lng:-93.0792,slug:"boone"},"Bradley":{lat:33.4665,lng:-92.1692,slug:"bradley"},"Calhoun":{lat:33.5605,lng:-92.5139,slug:"calhoun"},"Carroll":{lat:36.3374,lng:-93.541,slug:"carroll"},"Chicot":{lat:33.2671,lng:-91.2972,slug:"chicot"},"Clark":{lat:34.0533,lng:-93.1762,slug:"clark"},"Clay":{lat:36.3673,lng:-90.4187,slug:"clay"},"Cleburne":{lat:35.5936,lng:-92.0089,slug:"cleburne"},"Cleveland":{lat:33.8932,lng:-92.1887,slug:"cleveland"},"Columbia":{lat:33.223,lng:-93.2328,slug:"columbia"},"Conway":{lat:35.2657,lng:-92.6892,slug:"conway"},"Craighead":{lat:35.8277,lng:-90.6314,slug:"craighead"},"Crawford":{lat:35.583,lng:-94.2362,slug:"crawford"},"Crittenden":{lat:35.1976,lng:-90.3051,slug:"crittenden"},"Cross":{lat:35.2857,lng:-90.764,slug:"cross"},"Dallas":{lat:33.9678,lng:-92.654,slug:"dallas"},"Desha":{lat:33.8288,lng:-91.2441,slug:"desha"},"Drew":{lat:33.5872,lng:-91.7228,slug:"drew"},"Faulkner":{lat:35.1465,lng:-92.3369,slug:"faulkner"},"Franklin":{lat:35.5086,lng:-93.8877,slug:"franklin"},"Fulton":{lat:36.3813,lng:-91.8193,slug:"fulton"},"Garland":{lat:34.5789,lng:-93.1469,slug:"garland"},"Grant":{lat:34.2856,lng:-92.423,slug:"grant"},"Greene":{lat:36.1206,lng:-90.5663,slug:"greene"},"Hempstead":{lat:33.736,lng:-93.6644,slug:"hempstead"},"Hot Spring":{lat:34.3152,lng:-92.9441,slug:"hotspring"},"Howard":{lat:34.0831,lng:-93.9909,slug:"howard"},"Independence":{lat:35.7375,lng:-91.5599,slug:"independence"},"Izard":{lat:36.0949,lng:-91.9136,slug:"izard"},"Jackson":{lat:35.5965,lng:-91.2232,slug:"jackson"},"Jefferson":{lat:34.2772,lng:-91.9297,slug:"jefferson"},"Johnson":{lat:35.5734,lng:-93.4663,slug:"johnson"},"Lafayette":{lat:33.2406,lng:-93.6115,slug:"lafayette"},"Lawrence":{lat:36.0411,lng:-91.1012,slug:"lawrence"},"Lee":{lat:34.7795,lng:-90.7797,slug:"lee"},"Lincoln":{lat:33.9564,lng:-91.7424,slug:"lincoln"},"Little River":{lat:33.7019,lng:-94.2363,slug:"littleriver"},"Logan":{lat:35.2187,lng:-93.7209,slug:"logan"},"Lonoke":{lat:34.7551,lng:-91.8941,slug:"lonoke"},"Madison":{lat:36.0125,lng:-93.7241,slug:"madison"},"Marion":{lat:36.2667,lng:-92.6786,slug:"marion"},"Miller":{lat:33.3055,lng:-93.9015,slug:"miller"},"Mississippi":{lat:35.7669,lng:-90.0522,slug:"mississippi"},"Monroe":{lat:34.6795,lng:-91.2033,slug:"monroe"},"Montgomery":{lat:34.5457,lng:-93.6642,slug:"montgomery"},"Nevada":{lat:33.6667,lng:-93.3051,slug:"nevada"},"Newton":{lat:35.9107,lng:-93.2159,slug:"newton"},"Ouachita":{lat:33.5912,lng:-92.8784,slug:"ouachita"},"Perry":{lat:34.9464,lng:-92.9269,slug:"perry"},"Phillips":{lat:34.4237,lng:-90.8556,slug:"phillips"},"Pike":{lat:34.1582,lng:-93.6587,slug:"pike"},"Poinsett":{lat:35.5689,lng:-90.6811,slug:"poinsett"},"Polk":{lat:34.491,lng:-94.2309,slug:"polk"},"Pope":{lat:35.4566,lng:-93.0268,slug:"pope"},"Prairie":{lat:34.8311,lng:-91.5536,slug:"prairie"},"Pulaski":{lat:34.7703,lng:-92.313,slug:"pulaski"},"Randolph":{lat:36.3413,lng:-91.0284,slug:"randolph"},"Saline":{lat:34.6485,lng:-92.6745,slug:"saline"},"Scott":{lat:34.8589,lng:-94.0636,slug:"scott"},"Searcy":{lat:35.8964,lng:-92.6959,slug:"searcy"},"Sebastian":{lat:35.197,lng:-94.275,slug:"sebastian"},"Sevier":{lat:33.9949,lng:-94.2433,slug:"sevier"},"Sharp":{lat:36.1734,lng:-91.4711,slug:"sharp"},"St. Francis":{lat:35.0228,lng:-90.7515,slug:"stfrancis"},"Stone":{lat:35.857,lng:-92.1405,slug:"stone"},"Union":{lat:33.1682,lng:-92.5981,slug:"union"},"Van Buren":{lat:35.583,lng:-92.516,slug:"vanburen"},"Washington":{lat:35.978,lng:-94.2173,slug:"washington"},"White":{lat:35.2551,lng:-91.753,slug:"white"},"Woodruff":{lat:35.1928,lng:-91.2445,slug:"woodruff"},"Yell":{lat:34.9977,lng:-93.4083,slug:"yell"}},
+  NM: {"Bernalillo":{lat:35.0536,lng:-106.6691,slug:"bernalillo"},"Catron":{lat:33.9016,lng:-108.3919,slug:"catron"},"Chaves":{lat:33.3616,lng:-104.4698,slug:"chaves"},"Cibola":{lat:34.9283,lng:-107.9927,slug:"cibola"},"Colfax":{lat:36.613,lng:-104.6401,slug:"colfax"},"Curry":{lat:34.573,lng:-103.3461,slug:"curry"},"De Baca":{lat:34.3593,lng:-104.3687,slug:"debaca"},"DoÃ±a Ana":{lat:32.3499,lng:-106.835,slug:"doã±aana"},"Eddy":{lat:32.4578,lng:-104.3064,slug:"eddy"},"Grant":{lat:32.7321,lng:-108.3815,slug:"grant"},"Guadalupe":{lat:34.8698,lng:-104.785,slug:"guadalupe"},"Harding":{lat:35.8594,lng:-103.8534,slug:"harding"},"Hidalgo":{lat:31.8981,lng:-108.7519,slug:"hidalgo"},"Lea":{lat:32.7957,lng:-103.4133,slug:"lea"},"Lincoln":{lat:33.7408,lng:-105.4498,slug:"lincoln"},"Los Alamos":{lat:35.87,lng:-106.308,slug:"losalamos"},"Luna":{lat:32.1845,lng:-107.7472,slug:"luna"},"McKinley":{lat:35.5841,lng:-108.2533,slug:"mckinley"},"Mora":{lat:35.9828,lng:-104.9219,slug:"mora"},"Otero":{lat:32.6156,lng:-105.7513,slug:"otero"},"Quay":{lat:35.107,lng:-103.5481,slug:"quay"},"Rio Arriba":{lat:36.5097,lng:-106.694,slug:"rioarriba"},"Roosevelt":{lat:34.0212,lng:-103.483,slug:"roosevelt"},"San Juan":{lat:36.5116,lng:-108.3246,slug:"sanjuan"},"San Miguel":{lat:35.4769,lng:-104.8035,slug:"sanmiguel"},"Sandoval":{lat:35.6851,lng:-106.8831,slug:"sandoval"},"Santa Fe":{lat:35.5145,lng:-105.964,slug:"santafe"},"Sierra":{lat:33.1195,lng:-107.1882,slug:"sierra"},"Socorro":{lat:33.9917,lng:-106.9391,slug:"socorro"},"Taos":{lat:36.5772,lng:-105.6389,slug:"taos"},"Torrance":{lat:34.555,lng:-105.8906,slug:"torrance"},"Union":{lat:36.4881,lng:-103.4757,slug:"union"},"Valencia":{lat:34.7168,lng:-106.8066,slug:"valencia"}}
+};
+try { Object.assign(GIS_COUNTIES, GIS_COUNTIES_MORE); } catch (e) {}
 
 Object.entries(_GIS_RAW).forEach(([st, arr]) => {
   GIS_COUNTIES[st] = {};
@@ -2262,10 +2272,17 @@ const GIS_STATE_PARCELS = {
   TX: "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
   TN: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Tennessee_Property_Boundaries_Public_Use/FeatureServer/0",
   NC: "https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/MapServer/1",
+  // Expansion states — all verified live + returning polygons. CORS-direct unless noted.
+  OH: "https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0",
+  WI: "https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels/FeatureServer/0",
+  NM: "https://services2.arcgis.com/yvwHSwAamLDJNzPK/arcgis/rest/services/Final_land_parcel/FeatureServer/0",
+  IN: "https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0",  // via proxy
+  AR: "https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6",          // via proxy
+  MN: "https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/FeatureServer/0", // via proxy, geometry only
 };
 
 // APN / parcel-id field name on each statewide service (used by APN search; omit = no APN search)
-const GIS_STATE_APN_FIELD = { FL: "PARCEL_ID", TX: "GEO_ID", TN: "PARCELID", NC: "PARNO" };
+const GIS_STATE_APN_FIELD = { FL: "PARCEL_ID", TX: "GEO_ID", TN: "PARCELID", NC: "PARNO", OH: "LocalParcelID", WI: "PARCELID", IN: "parcel_id", AR: "parcelid" };
 
 // Bounding-box center [lat, lng] of a GeoJSON feature (for flying to a found parcel)
 function featCenter(feat) {
@@ -2289,127 +2306,77 @@ const COMP_CONFIG = {
         vacant: ["000","00","010","10","040","40","070","70","099","99"] },
 };
 
-// Comps rebuilt for LAND, not houses: hold the size bucket + zoning (vacant land) fixed and
-// expand RADIUS first, then the DATE window (12→18→24 mo) — instead of grabbing the nearest
-// stale sale. Sold records are "retail"; the offer is shown as a 30–50% range of that.
+// Comps split into UNIMPROVED (vacant land = offer basis) and IMPROVED (reference).
+// 3 each, matched on acreage, closest + most recent, ≤~1.3mi (prefer ≤1mi). One fast
+// bbox query (no server-side WHERE — slow on 10.8M parcels), everything filtered client-side.
 async function fetchComps(lat, lng, subjectAcres, state, proxy) {
   const cfg = COMP_CONFIG[state];
   if (!cfg) return { unsupported: true };
-  const now = new Date(), yr = now.getFullYear(), mo = now.getMonth() + 1;
-  const A = subjectAcres > 0 ? subjectAcres : 0;
-
-  // Size bucket drives BOTH the search radius and which sales are comparable — $/ac is wildly
-  // non-linear across sizes, so we never blend buckets. Distance widens with rural-ness.
-  const BUCKETS = [
-    { label: "infill lot (<1 ac)",  lo: 0,  hi: 1,        dists: [0.5, 1] },     // platted / near town
-    { label: "small acreage (1–5)", lo: 1,  hi: 5,        dists: [1, 3] },       // suburban / exurban
-    { label: "mid acreage (5–20)",  lo: 5,  hi: 20,       dists: [3, 5, 10] },   // rural
-    { label: "large acreage (20+)", lo: 20, hi: Infinity, dists: [5, 10] },      // rural / county-wide
-  ];
-  const bucket = A > 0 ? (BUCKETS.find((b) => A >= b.lo && A < b.hi) || BUCKETS[1]) : BUCKETS[1];
-  const queryRadius = bucket.dists[bucket.dists.length - 1];
-
-  // One bounded query: only real sales from the last 3 years within the widest tier, so the
-  // record cap fills with RELEVANT recent solds (not random parcels). Tiering is client-side.
-  const dlat = queryRadius / 69, dlng = queryRadius / (69 * Math.cos(lat * Math.PI / 180));
+  const yr = new Date().getFullYear();
+  const mi = 0.8, dlat = mi / 69, dlng = mi / (69 * Math.cos(lat * Math.PI / 180));
   const params = new URLSearchParams({
-    where: `${cfg.saleY} >= ${yr - 3} AND ${cfg.saleP} > 2000`,
     geometry: `${lng - dlng},${lat - dlat},${lng + dlng},${lat + dlat}`,
     geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
     outFields: [cfg.addr, cfg.saleP, cfg.saleY, cfg.saleM, cfg.sqft, cfg.use].join(","),
     returnCentroid: "true", returnGeometry: "false", resultRecordCount: "1500", f: "json",
   });
   let feats;
-  try { const r = await corsFetch(`${cfg.service}/query?${params}`, { timeout: 15000, proxy }); const j = await r.json(); feats = j.features || []; }
+  try { const r = await corsFetch(`${cfg.service}/query?${params}`, { timeout: 22000, proxy }); const j = await r.json(); feats = j.features || []; }
   catch (_) { return { timeout: true }; }
-
-  const ageMonths = (y, m) => (yr - y) * 12 + (mo - (m > 0 ? m : 6));
+  const A = subjectAcres > 0 ? subjectAcres : 0;
   const sold = feats.map((ft) => {
     const c = ft.centroid, p = ft.attributes || {};
     if (!c) return null;
-    const acres = sqftToAcres(p[cfg.sqft]), price = parseFloat(p[cfg.saleP]) || 0;
-    const y = parseFloat(p[cfg.saleY]) || 0, m = parseFloat(p[cfg.saleM]) || 0;
-    if (!(acres > 0 && price > 2000 && y > 0)) return null;
-    return { addr: String(p[cfg.addr] || "").trim(), m, y, price, acres, ppa: Math.round(price / acres),
-      age: ageMonths(y, m),
+    const acres = sqftToAcres(p[cfg.sqft]), price = parseFloat(p[cfg.saleP]) || 0, y = parseFloat(p[cfg.saleY]) || 0;
+    if (!(acres > 0 && price > 2000 && y >= yr - 5)) return null;
+    return { addr: String(p[cfg.addr] || "").trim(), m: p[cfg.saleM], y, price, acres, ppa: Math.round(price / acres),
       dist: Math.hypot((c.y - lat) * 69, (c.x - lng) * 69 * Math.cos(lat * Math.PI / 180)),
       vacant: cfg.vacant.includes(String(p[cfg.use] || "").trim()) };
   }).filter(Boolean);
-
-  const median = (a) => { if (!a.length) return 0; const s = a.slice().sort((x, y) => x - y), i = s.length >> 1; return s.length % 2 ? s[i] : Math.round((s[i - 1] + s[i]) / 2); };
-  const finalize = (chosen, dmax, months) => {
-    const ppa = median(chosen.filter((c) => c.ppa > 0).map((c) => c.ppa));   // median $/ac — robust to land's skew
-    const retail = A > 0 ? Math.round(ppa * A) : 0;                          // comp-derived retail (sold) value
-    return { comps: chosen, ppa, retail, count: chosen.length, dist: dmax, months,
-      offerLow: retail ? Math.round(retail * 0.30 / 100) * 100 : 0,
-      offerHigh: retail ? Math.round(retail * 0.50 / 100) * 100 : 0 };
+  // rank: prefer within 1mi, then most recent, then closest
+  const rank = (arr) => arr.slice().sort((a, b) => (a.dist <= 1 ? 0 : 1) - (b.dist <= 1 ? 0 : 1) || b.y - a.y || a.dist - b.dist);
+  const pick3 = (pool) => {
+    const band = A > 0 ? pool.filter((c) => c.acres >= A * 0.5 && c.acres <= A * 2) : pool;
+    let chosen = rank(band).slice(0, 3);
+    if (chosen.length < 3) chosen = chosen.concat(rank(pool.filter((c) => !chosen.includes(c))).slice(0, 3 - chosen.length));
+    const ppas = chosen.filter((c) => c.ppa > 0).map((c) => c.ppa);
+    const avg = ppas.length ? Math.round(ppas.reduce((a, b) => a + b, 0) / ppas.length) : 0;
+    return { comps: chosen, avg, est: A > 0 ? Math.round(avg * A) : 0 };
   };
-
-  // Expanding tiers: same bucket + same zoning; sweep radius fully at 12mo before bumping the
-  // date window. Rank by closest acreage, then distance, then recency. Target 3–5 solds.
-  const DATE_STEPS = [12, 18, 24];
-  const rank = (arr) => arr.slice().sort((a, b) =>
-    Math.abs(Math.log((a.acres || 1) / (A || a.acres || 1))) - Math.abs(Math.log((b.acres || 1) / (A || b.acres || 1)))
-    || a.dist - b.dist || a.age - b.age);
-  const pickTiered = (pool0) => {
-    const pool = pool0.filter((c) => c.acres >= bucket.lo && c.acres < bucket.hi);
-    let best = [], bd = bucket.dists[0], bm = 12;
-    for (const months of DATE_STEPS) {
-      for (const dmax of bucket.dists) {
-        const cands = pool.filter((c) => c.dist <= dmax && c.age <= months);
-        if (cands.length > best.length) { best = cands; bd = dmax; bm = months; }
-        if (cands.length >= 3) return finalize(rank(cands).slice(0, 5), dmax, months);
-      }
-    }
-    return finalize(rank(best).slice(0, 5), bd, bm);
-  };
-
-  const unimproved = pickTiered(sold.filter((c) => c.vacant));
-  const improved = pickTiered(sold.filter((c) => !c.vacant));
-  return { improved, unimproved, subjectAcres: A, bucket: bucket.label,
-    radius: Math.max(unimproved.dist || 0, improved.dist || 0) || bucket.dists[0],
-    months: Math.max(unimproved.months || 12, improved.months || 12) };
+  const unimproved = pick3(sold.filter((c) => c.vacant));
+  const improved = pick3(sold.filter((c) => !c.vacant));
+  const dists = [...unimproved.comps, ...improved.comps].map((c) => c.dist);
+  return { improved, unimproved, subjectAcres: A,
+    radius: dists.length ? Math.min(2, Math.max(1, Math.ceil(Math.max(...dists) * 10) / 10)) : 1 };
 }
 
-// Side-by-side comp columns — Offer (30–50% of retail, from vacant-land solds) vs Retail reference.
+// Side-by-side comp columns — unimproved (offer basis) vs improved (reference). pal = palette.
 function CompsColumns({ res, pal }) {
-  const money = (n) => "$" + Math.round(n || 0).toLocaleString();
   const col = (label, sub, data, hot) => (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: hot ? pal.accent : pal.dim, marginBottom: 5 }}>{label}</div>
       <div style={{ background: hot ? pal.hot : pal.panel, border: `1px solid ${hot ? pal.accent : pal.line}`, borderRadius: 8, padding: "7px 9px", marginBottom: 6 }}>
         <div style={{ fontSize: 8.5, color: pal.dim, textTransform: "uppercase", letterSpacing: ".04em" }}>{sub}</div>
-        {hot ? (
-          <>
-            <div style={{ fontSize: 15.5, fontWeight: 800, color: pal.accent, lineHeight: 1.15 }}>{data.offerHigh ? `${money(data.offerLow)}–${money(data.offerHigh)}` : "—"}</div>
-            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>retail {data.retail ? money(data.retail) : "—"} · {data.ppa ? money(data.ppa) + "/ac" : "—"}</div>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: 15.5, fontWeight: 800, color: pal.text, lineHeight: 1.15 }}>{data.retail ? money(data.retail) : "—"}</div>
-            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>{data.ppa ? money(data.ppa) + "/ac" : "—"}</div>
-          </>
-        )}
+        <div style={{ fontSize: 17, fontWeight: 800, color: hot ? pal.accent : pal.text, lineHeight: 1.1 }}>{data.est ? "$" + data.est.toLocaleString() : "—"}</div>
+        <div className="lc-mono" style={{ fontSize: 9.5, color: pal.dim }}>avg ${data.avg.toLocaleString()}/ac</div>
       </div>
       <div style={{ display: "grid", gap: 4 }}>
         {data.comps.length ? data.comps.map((c, i) => (
           <div key={i} style={{ lineHeight: 1.25 }}>
             <div style={{ fontSize: 10.5, color: pal.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.addr || "Vacant parcel"}</div>
-            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>{c.m ? c.m + "/" : ""}{c.y} · {c.acres.toFixed(2)}ac · {c.dist.toFixed(1)}mi · ${Math.round(c.price / 1000)}k</div>
+            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>{c.m}/{c.y} · {c.acres.toFixed(2)}ac · {c.dist.toFixed(1)}mi · ${Math.round(c.price / 1000)}k</div>
           </div>
-        )) : <div style={{ fontSize: 10.5, color: pal.dim }}>No solds in range</div>}
+        )) : <div style={{ fontSize: 10.5, color: pal.dim }}>None found nearby</div>}
       </div>
     </div>
   );
   return (
     <div>
       <div style={{ display: "flex", gap: 10 }}>
-        {col("Your Offer · Land", "30–50% of retail", res.unimproved, true)}
-        {col("Retail · If built", "Reference", res.improved, false)}
+        {col("Unimproved · Land", "Your offer basis", res.unimproved, true)}
+        {col("Improved · Reference", "If a home were built", res.improved, false)}
       </div>
-      <div style={{ fontSize: 8.5, color: pal.dim, marginTop: 7, lineHeight: 1.45 }}>
-        {res.bucket ? res.bucket + " · " : ""}{res.unimproved.count || 0} vacant sold ≤{res.unimproved.dist || res.radius}mi, last {res.unimproved.months || 12}mo (median $/ac). Offer = 30–50% of comp-derived retail. Widen radius → date, never size/zoning.
-      </div>
+      <div style={{ fontSize: 8.5, color: pal.dim, marginTop: 7, lineHeight: 1.45 }}>3 closest recent sales ≤{res.radius}mi, matched on acreage. Unimproved = land offer; improved = value if built — use if they push back on price.</div>
     </div>
   );
 }
@@ -2485,40 +2452,25 @@ function applyProxy(proxy, u) {
     : proxy + (proxy.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(u);
 }
 function corsFetch(url, { signal, timeout = 9000, proxy = "" } = {}) {
-  // STAGGER-RACE instead of one-at-a-time. Sequential fallbacks meant a non-CORS state
-  // (NC/IN/AR/MN) paid for every failure in order — worst case 25s+. Now: the direct
-  // request fires immediately (CORS-enabled hosts win in <1s and no relay is bothered);
-  // if it hasn't won within 700ms, the user's proxy + public relays all fire IN PARALLEL
-  // and the first OK response wins. Losers are aborted.
-  const routes = [(u) => u];
-  if (proxy) routes.push((u) => applyProxy(proxy, u));    // user's proxy — most reliable for non-CORS servers
+  const routes = [(u) => u];                              // direct first — CORS-enabled statewide services (FL/TX/TN) succeed instantly
+  if (proxy) routes.push((u) => applyProxy(proxy, u));    // user's proxy — for non-CORS servers (NC + county fallbacks)
   routes.push((u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`);
   routes.push((u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
-  return new Promise((resolve, reject) => {
-    let settled = false, pending = routes.length, lastErr;
-    const ctls = [];
-    const abortAll = () => ctls.forEach((c) => { try { c.abort(); } catch (_) {} });
-    if (signal) signal.addEventListener("abort", () => {
-      if (!settled) { settled = true; abortAll(); reject(new Error("aborted")); }
-    }, { once: true });
-    const fire = (wrap) => {
-      if (settled) { pending--; return; }
-      const ctl = new AbortController(); ctls.push(ctl);
-      const timer = setTimeout(() => ctl.abort(), timeout);
-      fetch(wrap(url), { signal: ctl.signal })
-        .then((res) => {
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          if (!settled) { settled = true; abortAll(); resolve(res); }
-        })
-        .catch((e) => { lastErr = e; })
-        .finally(() => {
-          clearTimeout(timer);
-          if (--pending <= 0 && !settled) { settled = true; reject(lastErr || new Error("all CORS routes failed")); }
-        });
-    };
-    fire(routes[0]);
-    if (routes.length > 1) setTimeout(() => routes.slice(1).forEach(fire), 700);
-  });
+  return (async () => {
+    let lastErr;
+    for (const wrap of routes) {
+      if (signal && signal.aborted) throw new Error("aborted");
+      try {
+        const res = await fetch(wrap(url), { signal: signal || AbortSignal.timeout(timeout) });
+        if (res.ok) return res;
+        lastErr = new Error("HTTP " + res.status);
+      } catch (e) {
+        lastErr = e;
+        if (signal && signal.aborted) throw e;   // caller cancelled (stale request)
+      }
+    }
+    throw lastErr || new Error("all CORS routes failed");
+  })();
 }
 
 // Query ArcGIS parcel at a point
@@ -2529,7 +2481,7 @@ async function queryArcGISParcel(serviceUrl, lat, lng, proxy = "") {
       spatialRel: "esriSpatialRelIntersects", outFields: "*",
       returnGeometry: "true", inSR: "4326", outSR: "4326", f: "geojson",
     });
-    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { timeout: 15000, proxy });
+    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { timeout: 9000, proxy });
     const json = await res.json();
     return json.features?.[0] || null;
   } catch (_) { return null; }
@@ -2569,54 +2521,19 @@ function nearestCounty(st, lat, lng) {
   return best;
 }
 
-// Query every parcel intersecting the current map bounds (for showing all lot outlines).
-// The 30s budget matters: statewide layers (FL = 10.8M parcels) can take 10-20s over dense
-// plats like Lehigh Acres — a short timeout kills the query and NO lines render at all.
-// `split` quarters the viewport into 4 parallel queries: 4x the record budget (dense plats
-// hold 3-5k lots per z15 screen, one 1500-cap query leaves gaps) and each returns faster.
-async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = "", split = false) {
-  const run = async (w, s, e, n, cap) => {
-    const query = async (slim) => {
-      const qs = new URLSearchParams({
-        geometry: `${w},${s},${e},${n}`,
-        geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
-        outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
-        f: "geojson", resultRecordCount: String(cap),
-      });
-      // ~1m server-side generalization + 6-decimal coords: invisible at z15–18, but cuts the
-      // geometry payload (the bulk of every lot-lines fetch) by 60–80% -> faster pan/zoom.
-      if (slim) { qs.set("maxAllowableOffset", "0.00001"); qs.set("geometryPrecision", "6"); }
-      const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, timeout: 30000, proxy });
-      return res.json();
-    };
-    try {
-      let json = await query(true);
-      // Self-heal: if the server errors on the generalization params, retry plain rather than
-      // render nothing. (A genuinely empty area returns features:[] — no retry burned there.)
-      if (json && json.error) json = await query(false);
-      return (json && json.features) || [];
-    } catch (_) { return []; }   // one failed quadrant shouldn't blank the rest
-  };
-  const W = bounds.getWest(), S = bounds.getSouth(), E = bounds.getEast(), N = bounds.getNorth();
-  if (!split) return run(W, S, E, N, 1500);
-  const mx = (W + E) / 2, my = (S + N) / 2;
-  const parts = await Promise.all([
-    run(W, S, mx, my, 1500), run(mx, S, E, my, 1500),
-    run(W, my, mx, N, 1500), run(mx, my, E, N, 1500),
-  ]);
-  // Parcels straddling a quadrant seam come back twice — dedupe by parcel id, else by the
-  // first two vertices (adjacent lots can share ONE corner, so a single point isn't enough).
-  const seen = new Set(), out = [];
-  for (const f of parts.flat()) {
-    const p = f.properties || {};
-    let k = p.PARCEL_ID || p.PARCELID || p.PIN || p.OBJECTID || p.FID;
-    if (k === undefined || k === null || k === "") {
-      try { const r = f.geometry.coordinates[0]; k = JSON.stringify(r[0]) + JSON.stringify(r[1]); }
-      catch (_) { out.push(f); continue; }
-    }
-    if (!seen.has(k)) { seen.add(k); out.push(f); }
-  }
-  return out;
+// Query every parcel intersecting the current map bounds (for showing all lot outlines)
+async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = "") {
+  try {
+    const qs = new URLSearchParams({
+      geometry: `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`,
+      geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
+      outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
+      f: "geojson", resultRecordCount: "1500",
+    });
+    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, proxy });
+    const json = await res.json();
+    return json.features || [];
+  } catch (_) { return []; }
 }
 
 const STATE_ABBR = { "Florida": "FL", "Texas": "TX", "Tennessee": "TN", "North Carolina": "NC" };
@@ -2833,12 +2750,7 @@ function ParcelCard({ parcel, onClose, onAddToPipeline, onToggleSave, onStartDea
           {!comps ? (
             <div style={{ fontSize: 12, color: T.textDim, padding: "4px 0", animation: "gpulse 1.2s infinite" }}>◌ Pulling recent sales nearby…</div>
           ) : comps.unsupported ? (
-            <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>
-              {parcel.state === "TX"
-                ? "Texas is a non-disclosure state — sale prices aren't public record, so auto-comps can't be built from government data. Use the assessed values above as your anchor and pull sold listings manually:"
-                : "Auto-comps run on Florida parcels (FL's public data carries sale price + date). This state's parcel layer doesn't, so pull recent sold land manually:"}
-              <a href={`https://www.google.com/search?q=${encodeURIComponent(`recently sold vacant land ${parcel.county || ""} county ${parcel.state || ""}`)}`} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 6, color: T.accent, fontWeight: 700, textDecoration: "none" }}>↗ Recent sold land comps nearby</a>
-            </div>
+            <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>On-the-fly comps run on Florida parcels today (FL's data carries sale price + date). Other states need a sales feed — ask to wire one in.</div>
           ) : comps.timeout ? (
             <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>The Florida parcel service was slow — comps didn't load. Re-tap the lot to retry.</div>
           ) : (
@@ -2924,7 +2836,8 @@ function GISTab({ data, update, onStartDeal }) {
 
   const countyNames = React.useMemo(() => Object.keys(GIS_COUNTIES[stateFilter] || {}), [stateFilter]);
 
-  const STATE_CENTERS = { FL: [27.8, -81.5, 7], TX: [31.5, -99.3, 6], TN: [35.8, -86.4, 7], NC: [35.5, -79.4, 7] };
+  const STATE_CENTERS = { FL: [27.8, -81.5, 7], TX: [31.5, -99.3, 6], TN: [35.8, -86.4, 7], NC: [35.5, -79.4, 7],
+    OH: [40.32, -82.83, 7], IN: [39.84, -86.22, 7], WI: [44.41, -89.77, 7], MN: [45.55, -94.43, 6], AR: [34.91, -92.43, 7], NM: [34.55, -105.89, 7] };
 
   React.useEffect(() => {
     let mounted = true;
@@ -2972,61 +2885,44 @@ function GISTab({ data, update, onStartDeal }) {
           }),
         }).addTo(map);
 
-        const stGuess = ctrlRef.current.stateFilter || null;
-        const same = (prev) => prev && prev.lat === lat && prev.lng === lng;
-
-        // Direct lot click: owner/APN/acreage are ALREADY on the clicked feature — show the
-        // card and kick off comps IMMEDIATELY. The geocode (address/county/links) merges in
-        // when it returns; it never blocks the card anymore.
-        if (presetFeat) {
-          if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(presetFeat); }
-          if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
-          const pf = extractParcelFields(presetFeat.properties);
-          if (mounted) { setSelected({ lat, lng, zip: "", county: "", state: stGuess, urls: {}, fullAddress: "", fields: pf, hasFeat: true }); setLoading(false); }
-          loadComps(lat, lng, stGuess, pf);
-        }
-
-        // Empty-area click: query the parcel record CONCURRENTLY with the geocode, using the
-        // current state's service (clicking outside the selected state is the rare case,
-        // corrected below once the geocode names the true state).
-        let featP = null;
-        if (!presetFeat && stGuess && GIS_STATE_PARCELS[stGuess] && ctrlRef.current.showParcels) {
-          featP = queryArcGISParcel(GIS_STATE_PARCELS[stGuess], lat, lng, ctrlRef.current.proxy);
-        }
-
         try {
           const geo = await reverseGeocode(lat, lng, 18);
           const stateName = geo?.address?.state || "";
-          const st = STATE_ABBR[stateName] || stGuess || null;
+          const st = STATE_ABBR[stateName] || ctrlRef.current.stateFilter || null;
           const rawCounty = normCounty(geo?.address?.county || geo?.address?.state_district || "");
           const countyData = st ? GIS_COUNTIES[st]?.[rawCounty] : null;
-          const urls = getCountyUrls(st || stGuess, rawCounty, countyData?.slug || "");
-          const base = { zip: geo?.address?.postcode || "", county: rawCounty, state: st, urls, fullAddress: buildAddress(geo) };
+          const serviceUrl = (st && GIS_STATE_PARCELS[st]) || (st ? GIS_PARCEL_SERVICES[`${st}_${rawCounty}`] : null);
+          const urls = getCountyUrls(st || ctrlRef.current.stateFilter, rawCounty, countyData?.slug || "");
+          const fullAddress = buildAddress(geo);
+          const base = { lat, lng, zip: geo?.address?.postcode || "", county: rawCounty, state: st, urls, fullAddress };
 
+          // Direct lot click: we already have the geometry — illuminate + show immediately
           if (presetFeat) {
-            if (mounted) setSelected(prev => same(prev) ? { ...prev, ...base } : prev);
-            if (st !== stGuess) loadComps(lat, lng, st, extractParcelFields(presetFeat.properties));  // guess was wrong — redo comps under the true state
+            if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(presetFeat); }
+            if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
+            const pf = extractParcelFields(presetFeat.properties);
+            if (mounted) { setSelected({ ...base, fields: pf, hasFeat: true }); setLoading(false); }
+            loadComps(lat, lng, st, pf);
             return;
           }
 
-          // Empty-area: show the card with the address now; parcel record fills in as it lands
-          if (mounted) { setSelected({ lat, lng, ...base, fields: {}, hasFeat: false }); setLoading(false); }
-          let feat = null;
-          if (featP && st === stGuess) feat = await featP;
-          else {
-            const serviceUrl = (st && GIS_STATE_PARCELS[st]) || (st ? GIS_PARCEL_SERVICES[`${st}_${rawCounty}`] : null);
-            if (serviceUrl && ctrlRef.current.showParcels) feat = await queryArcGISParcel(serviceUrl, lat, lng, ctrlRef.current.proxy);
-          }
+          // Empty-area click: show the card with the address NOW; parcel record (CORS-proxied,
+          // can be slow/unavailable) fills in asynchronously without blocking the card.
+          if (mounted) { setSelected({ ...base, fields: {}, hasFeat: false }); setLoading(false); }
           let qf = {};
-          if (feat && mounted) {
-            if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(feat); }
-            if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
-            qf = extractParcelFields(feat.properties);
-            setSelected(prev => same(prev) ? { ...prev, fields: qf, hasFeat: true } : prev);
+          if (serviceUrl && ctrlRef.current.showParcels) {
+            const feat = await queryArcGISParcel(serviceUrl, lat, lng, ctrlRef.current.proxy);
+            if (feat && mounted) {
+              if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(feat); }
+              if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
+              qf = extractParcelFields(feat.properties);
+              setSelected(prev => (prev && prev.lat === lat && prev.lng === lng)
+                ? { ...prev, fields: qf, hasFeat: true } : prev);
+            }
           }
           loadComps(lat, lng, st, qf);
         } catch (_) {
-          if (mounted) { if (!presetFeat) setError("Could not load parcel data — check your connection."); setLoading(false); }
+          if (mounted) { setError("Could not load parcel data — check your connection."); setLoading(false); }
         }
       }
 
@@ -3055,9 +2951,7 @@ function GISTab({ data, update, onStartDeal }) {
         if (viewAbortRef.current) viewAbortRef.current.abort();
         const ac = new AbortController(); viewAbortRef.current = ac;
         setFetchingParcels(true);
-        // Quadrant-split at the wide zooms (15–16) where dense plats blow past one query's
-        // record cap; at 17+ the viewport is small enough for a single fast query.
-        const feats = await queryArcGISParcelsInBounds(serviceUrl, map.getBounds(), ac.signal, ctrlRef.current.proxy, z <= 16);
+        const feats = await queryArcGISParcelsInBounds(serviceUrl, map.getBounds(), ac.signal, ctrlRef.current.proxy);
         if (ac.signal.aborted || !mounted) return;
         if (parcelLayerRef.current) { parcelLayerRef.current.clearLayers(); if (feats.length) parcelLayerRef.current.addData(feats); }
         setFetchingParcels(false);
@@ -3067,7 +2961,7 @@ function GISTab({ data, update, onStartDeal }) {
 
       function scheduleParcelLoad() {
         if (moveTimerRef.current) clearTimeout(moveTimerRef.current);
-        moveTimerRef.current = setTimeout(loadParcelsInView, 300);
+        moveTimerRef.current = setTimeout(loadParcelsInView, 450);
       }
 
       map.on("zoomend", () => { if (mounted) setZoom(map.getZoom()); });
@@ -3278,7 +3172,7 @@ function GISTab({ data, update, onStartDeal }) {
         <div style={{ display: "flex", gap: 6, width: isMobile ? "100%" : "min(330px, 64vw)" }}>
           <select value={stateFilter} onChange={e => flyToState(e.target.value)} className="gcb" title="State"
             style={{ flexShrink: 0, width: 72, padding: "8px 8px", borderRadius: 16, border: `1px solid ${T.border}`, background: T.glass, color: T.text, fontSize: 12.5, fontWeight: 800, outline: "none", cursor: "pointer", WebkitAppearance: "none", appearance: "none", textAlign: "center" }}>
-            {["FL","TX","TN","NC"].map(st => <option key={st} value={st} style={{ color: "#111", background: "#fff" }}>{st}</option>)}
+            {["FL","TX","TN","NC","OH","IN","WI","MN","AR","NM"].map(st => <option key={st} value={st} style={{ color: "#111", background: "#fff" }}>{st}</option>)}
           </select>
           <select value={selectedCounty} onChange={e => flyToCounty(e.target.value)} className="gcb" title="County"
             style={{ flex: 1, minWidth: 0, padding: "8px 12px", borderRadius: 16, border: `1px solid ${T.border}`, background: T.glass, color: T.text, fontSize: 12.5, fontWeight: 600, outline: "none", cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
