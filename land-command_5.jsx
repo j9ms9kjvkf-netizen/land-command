@@ -2576,6 +2576,41 @@ const GT = {
 // Normalize county name from Nominatim
 function normCounty(raw) { return (raw || "").replace(/ County$/i, "").replace(/ Parish$/i, "").trim(); }
 
+// Clean up assessor owner-name strings. County data arrives ALL-CAPS with jammed
+// separators ("SMITH,JOHN L", "DOE JOHN &DOE JANE") and joint owners often live in a
+// second field this used to ignore. Splits on &/AND, reorders "LAST, FIRST" (people
+// only — never businesses), title-cases with LLC/JR/II-style tokens kept uppercase,
+// dedupes, and joins co-owners with " & ".
+function formatOwnerName(raw, raw2) {
+  const KEEP = new Set(["LLC","INC","LLP","LP","PLLC","PLC","PA","PC","CO","CORP","TR","HOA","II","III","IV","JR","SR","ETAL","FBO","REV","DBA","USA","FL","TX","TN","NC"]);
+  const BIZ = /\b(LLC|INC|CORP|CORPORATION|COMPANY|TRUST|TRUSTEE|PROPERTIES|HOLDINGS|PARTNERS|INVESTMENTS|ENTERPRISES|BANK|CHURCH|MINISTRIES|ASSOC|ASSOCIATION|HOA|ESTATE|ESTATES|LP|LLP|PLLC|CITY OF|COUNTY|STATE OF|DEPT|AUTHORITY|DISTRICT)\b/i;
+  const tidy = (s) => String(s || "")
+    .replace(/\s*&\s*/g, " & ")        // "JOHN &JANE" / "JOHN& JANE" -> "JOHN & JANE"
+    .replace(/\s+AND\s+/gi, " & ")
+    .replace(/\s*,\s*/g, ", ")         // "SMITH,JOHN" -> "SMITH, JOHN"
+    .replace(/\s+/g, " ")
+    .trim();
+  const titleWord = (w) => {
+    const bare = w.replace(/[^A-Za-z]/g, "").toUpperCase();
+    if (KEEP.has(bare) || bare.length <= 1) return w.toUpperCase();
+    return w.toLowerCase().replace(/(^|[^a-z])([a-z])/g, (m, a, b) => a + b.toUpperCase()); // handles O'Brien, Smith-Jones
+  };
+  const person = (s) => {
+    s = s.trim();
+    if (!BIZ.test(s)) {
+      const m = s.match(/^([^,]+),\s*(.+)$/);              // "SMITH, JOHN L" -> "JOHN L SMITH"
+      if (m && !KEEP.has(m[2].trim().toUpperCase())) s = `${m[2]} ${m[1]}`.trim();
+    }
+    return s.split(" ").map(titleWord).join(" ");
+  };
+  let names = [];
+  [raw, raw2].forEach((r) => {
+    tidy(r).split(" & ").forEach((p) => { if (p.trim()) names.push(person(p)); });
+  });
+  names = names.filter((n, i) => names.findIndex((x) => x.toLowerCase() === n.toLowerCase()) === i); // some counties repeat owner 1 in owner 2
+  return names.join(" & ");
+}
+
 // Extract parcel fields from ArcGIS response (field names vary widely by county)
 function extractParcelFields(props) {
   if (!props) return {};
@@ -2590,7 +2625,10 @@ function extractParcelFields(props) {
   };
   return {
     apn:         pick("PARCEL_ID","APN","PIN","PARCELID","FOLIO","ACCOUNT_NUM","ACCT","GPIN","REID","PIN_NUM","PARCEL","ACCOUNT","PROP_ID","GEO_ID","PARCELNO","PARNO","PARID","PARCELNUMB"),
-    owner:       pick("OWNER","OWNER_NAME","OWNERNAME","OWN_NAME","OWNER1","OWNER_FULL","TAXPAYER","NAME","OWNER_FIRST_NAME","OWNNAME1","OWN1"),
+    owner:       formatOwnerName(
+                   pick("OWNER","OWNER_NAME","OWNERNAME","OWN_NAME","OWNER1","OWNER_FULL","TAXPAYER","NAME","OWNER_FIRST_NAME","OWNNAME1","OWN1"),
+                   pick("OWNER2","OWNER_NAME2","OWNERNAME2","OWN_NAME2","OWNNAME2","OWN2","OWNER_2","CO_OWNER","COOWNER","MAILNAME2","OWNER_NAME_2")
+                 ),
     address:     pick("SITE_ADDR","SITUS","PROP_ADDR","PROPERTY_ADDRESS","SITE_ADDRESS","LOCATION","ADDRESS","PHY_ADDR","SITUS_ADDR","PROP_LOCATION","PHY_ADDR1","SITEADDRESS","PAR_ADDR","SITE_ADD","PROPADDR"),
     mailingAddr: pick("MAIL_ADDR","MAILING_ADDRESS","MAIL_ADDRESS","OWNER_ADDR","OWN_ADDR","MAIL_STREET","OWN_ADDR1","OWNER_ADDRESS","MAILADDR"),
     city:        pick("MAIL_CITY","OWNER_CITY","CITY","CITY_NAME","MAIL_CTY","OWN_CITY","PHY_CITY"),
