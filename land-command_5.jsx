@@ -2546,7 +2546,7 @@ async function queryArcGISParcel(serviceUrl, lat, lng, proxy = "") {
       spatialRel: "esriSpatialRelIntersects", outFields: "*",
       returnGeometry: "true", inSR: "4326", outSR: "4326", f: "geojson",
     });
-    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { timeout: 9000, proxy });
+    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { timeout: 15000, proxy });
     const json = await res.json();
     return json.features?.[0] || null;
   } catch (_) { return null; }
@@ -2586,22 +2586,48 @@ function nearestCounty(st, lat, lng) {
   return best;
 }
 
-// Query every parcel intersecting the current map bounds (for showing all lot outlines)
-async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = "") {
-  try {
-    const qs = new URLSearchParams({
-      geometry: `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`,
-      geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
-      outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
-      f: "geojson", resultRecordCount: "1500",
-      // ~1m server-side generalization + 6-decimal coords: invisible at z15–18, but cuts the
-      // geometry payload (the bulk of every lot-lines fetch) by 60–80% -> faster pan/zoom.
-      maxAllowableOffset: "0.00001", geometryPrecision: "6",
-    });
-    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, proxy });
-    const json = await res.json();
-    return json.features || [];
-  } catch (_) { return []; }
+// Query every parcel intersecting the current map bounds (for showing all lot outlines).
+// The 30s budget matters: statewide layers (FL = 10.8M parcels) can take 10-20s over dense
+// plats like Lehigh Acres — a short timeout kills the query and NO lines render at all.
+// `split` quarters the viewport into 4 parallel queries: 4x the record budget (dense plats
+// hold 3-5k lots per z15 screen, one 1500-cap query leaves gaps) and each returns faster.
+async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = "", split = false) {
+  const run = async (w, s, e, n, cap) => {
+    try {
+      const qs = new URLSearchParams({
+        geometry: `${w},${s},${e},${n}`,
+        geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
+        outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
+        f: "geojson", resultRecordCount: String(cap),
+        // ~1m server-side generalization + 6-decimal coords: invisible at z15–18, but cuts the
+        // geometry payload (the bulk of every lot-lines fetch) by 60–80% -> faster pan/zoom.
+        maxAllowableOffset: "0.00001", geometryPrecision: "6",
+      });
+      const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, timeout: 30000, proxy });
+      const json = await res.json();
+      return json.features || [];
+    } catch (_) { return []; }   // one failed quadrant shouldn't blank the rest
+  };
+  const W = bounds.getWest(), S = bounds.getSouth(), E = bounds.getEast(), N = bounds.getNorth();
+  if (!split) return run(W, S, E, N, 1500);
+  const mx = (W + E) / 2, my = (S + N) / 2;
+  const parts = await Promise.all([
+    run(W, S, mx, my, 1500), run(mx, S, E, my, 1500),
+    run(W, my, mx, N, 1500), run(mx, my, E, N, 1500),
+  ]);
+  // Parcels straddling a quadrant seam come back twice — dedupe by parcel id, else by the
+  // first two vertices (adjacent lots can share ONE corner, so a single point isn't enough).
+  const seen = new Set(), out = [];
+  for (const f of parts.flat()) {
+    const p = f.properties || {};
+    let k = p.PARCEL_ID || p.PARCELID || p.PIN || p.OBJECTID || p.FID;
+    if (k === undefined || k === null || k === "") {
+      try { const r = f.geometry.coordinates[0]; k = JSON.stringify(r[0]) + JSON.stringify(r[1]); }
+      catch (_) { out.push(f); continue; }
+    }
+    if (!seen.has(k)) { seen.add(k); out.push(f); }
+  }
+  return out;
 }
 
 const STATE_ABBR = { "Florida": "FL", "Texas": "TX", "Tennessee": "TN", "North Carolina": "NC" };
@@ -3036,7 +3062,9 @@ function GISTab({ data, update, onStartDeal }) {
         if (viewAbortRef.current) viewAbortRef.current.abort();
         const ac = new AbortController(); viewAbortRef.current = ac;
         setFetchingParcels(true);
-        const feats = await queryArcGISParcelsInBounds(serviceUrl, map.getBounds(), ac.signal, ctrlRef.current.proxy);
+        // Quadrant-split at the wide zooms (15–16) where dense plats blow past one query's
+        // record cap; at 17+ the viewport is small enough for a single fast query.
+        const feats = await queryArcGISParcelsInBounds(serviceUrl, map.getBounds(), ac.signal, ctrlRef.current.proxy, z <= 16);
         if (ac.signal.aborted || !mounted) return;
         if (parcelLayerRef.current) { parcelLayerRef.current.clearLayers(); if (feats.length) parcelLayerRef.current.addData(feats); }
         setFetchingParcels(false);
