@@ -50,7 +50,18 @@ async function loadData() {
 }
 async function saveData(data) {
   memoryStore = data;
-  try { await window.storage.set(STORE_KEY, JSON.stringify(data)); } catch (e) { /* in-memory only */ }
+  try {
+    const r = await window.storage.set(STORE_KEY, JSON.stringify(data));
+    return !!r;
+  } catch (e) { return false; }
+}
+async function probeStorage() {
+  try {
+    if (typeof window === "undefined" || !window.storage) return false;
+    await window.storage.set("landcommand:probe", String(Date.now()));
+    const r = await window.storage.get("landcommand:probe");
+    return !!(r && r.value);
+  } catch (e) { return false; }
 }
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -201,7 +212,7 @@ function scoreParcel(p, b) {
 
   const score = applicable ? Math.round((hit / applicable) * 100) : 0;
   let verdict, color, bg;
-  if (hard.length) { verdict = "NO GO — DEAL BREAKER"; color = C.red; bg = C.redPale; }
+  if (hard.length) { verdict = "PASS — DEAL BREAKER"; color = C.red; bg = C.redPale; }
   else if (score >= 85) { verdict = "STRONG MATCH — SEND IT"; color = C.green; bg = C.greenPale; }
   else if (score >= 65) { verdict = "CLOSE — VERIFY & NEGOTIATE"; color = C.amber; bg = C.amberPale; }
   else { verdict = "WEAK MATCH"; color = C.faint; bg = "#EEEFEA"; }
@@ -456,8 +467,14 @@ function boxSummary(b) {
   return bits.join(" · ");
 }
 
-function BuyBoxesTab({ data, update }) {
+function BuyBoxesTab({ data, update, prefill, onPrefillConsumed }) {
   const [editing, setEditing] = useState(null); // box object or null
+  useEffect(() => {
+    if (prefill) {
+      setEditing({ ...emptyBox(), counties: prefill.counties || "", state: prefill.state || "" });
+      onPrefillConsumed && onPrefillConsumed();
+    }
+  }, [prefill]);
   const save = (box) => {
     const exists = data.buyboxes.some(x => x.id === box.id);
     const buyboxes = exists ? data.buyboxes.map(x => x.id === box.id ? box : x) : [...data.buyboxes, box];
@@ -514,11 +531,6 @@ function FindDealsTab({ data }) {
   if (!data.buyboxes.length) return (
     <div style={{ border: `2px dashed ${C.line}`, borderRadius: 8, padding: 40, textAlign: "center", color: C.faint }}>
       Add a buy box first — the deal finder builds every search around the builder's exact criteria.
-    </div>
-  );
-  if (!box || !links) return (
-    <div style={{ border: `2px dashed ${C.line}`, borderRadius: 8, padding: 40, textAlign: "center", color: C.faint }}>
-      Select a buy box above to load sourcing links.
     </div>
   );
   return (
@@ -756,7 +768,7 @@ function LeadForm({ initial, buyboxes, onSave, onCancel }) {
   );
 }
 
-function PipelineTab({ data, update, onResumeDeal }) {
+function PipelineTab({ data, update }) {
   const [editing, setEditing] = useState(null);
   const [filter, setFilter] = useState("All");
   const [scriptsFor, setScriptsFor] = useState(null); // lead id
@@ -779,7 +791,12 @@ function PipelineTab({ data, update, onResumeDeal }) {
   const [pasteText, setPasteText] = useState("");
   const [copiedCsv, setCopiedCsv] = useState(false);
 
-  const buildCSV = () => leadsToCSV(data.leads);
+  const buildCSV = () => {
+    const headers = ["OwnerName","Phone","MailingAddress","PropertyAddress","APN","County","Zip","Acres","TargetPrice","MyOffer","Status","BuyBox","Source","LastText","LastCall","LastMailer","Created","Notes"];
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = data.leads.map(l => [l.owner,l.phone,l.mailing,l.address,l.apn,l.county,l.zip,l.acres,l.price,l.offer,l.status,l.buybox,l.source,l.texted,l.called,l.mailed,l.created,l.notes].map(esc).join(","));
+    return [headers.join(","), ...rows].join("\r\n");
+  };
 
   const exportCSV = () => {
     const csv = buildCSV();
@@ -810,12 +827,8 @@ function PipelineTab({ data, update, onResumeDeal }) {
         acres: pick(row, ["acres","acreage","lotsize","lotacres","lotsizeacres","calculatedacres"]),
         address: pick(row, ["address","propertyaddress","situsaddress","situs","siteaddress","propertyfulladdress"]),
         mailing: pick(row, ["mailing","mailingaddress","owneraddress","mailaddress","mailingfulladdress","ownermailingaddress"]),
-        price: pick(row, ["price","targetprice","askingprice","listprice","assessedvalue","marketvalue"]),
-        offer: pick(row, ["myoffer","offer","youroffer"]),
-        status: pick(row, ["status"]) || "New",
-        buybox: pick(row, ["buybox","matchedbuybox"]),
-        notes: pick(row, ["notes","note","comments"]),
-        source: pick(row, ["source","leadsource"]) || "CSV import",
+        price: pick(row, ["price","askingprice","listprice","assessedvalue","marketvalue"]),
+        source: "CSV import",
       })).filter(l => l.owner || l.apn || l.address);
       if (!newLeads.length) {
         setImportMsg("No usable rows found — make sure the first line is a header row with owner / APN / address columns.");
@@ -934,8 +947,7 @@ function PipelineTab({ data, update, onResumeDeal }) {
                   <Btn small kind="ghost" onClick={() => touch(l, "mailed")}>▣ Mailed{l.mailed ? ` ${l.mailed.slice(5)}` : ""}</Btn>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {onResumeDeal && <Btn small onClick={() => onResumeDeal(l)}>▶ {l.stage ? "Resume" : "Work"} Deal</Btn>}
-                  <Btn small kind="ghost" onClick={() => setScriptsFor(scriptsFor === l.id ? null : l.id)}>{scriptsFor === l.id ? "▾ Hide" : "✍ Scripts"}</Btn>
+                  <Btn small onClick={() => setScriptsFor(scriptsFor === l.id ? null : l.id)}>{scriptsFor === l.id ? "▾ Hide texts & mailers" : "✉ Texts & Mailers"}</Btn>
                   <Btn small kind="ghost" onClick={() => setEditing({ ...l })}>Edit</Btn>
                   <Btn small kind="danger" onClick={() => update({ ...data, leads: data.leads.filter(x => x.id !== l.id) })}>Delete</Btn>
                 </div>
@@ -953,19 +965,400 @@ function PipelineTab({ data, update, onResumeDeal }) {
    App shell
    ============================================================ */
 const TABS = [
-  ["gis", "Map"],
+  ["home", "Command"],
+  ["scout", "Market Scout"],
   ["boxes", "Buy Boxes"],
   ["find", "Find Deals"],
+  ["delinq", "Delinquency Hub"],
   ["match", "Match a Parcel"],
-  ["calc", "Deal Calc"],
+  ["pricing", "Pricing Calc"],
+  ["calls", "Call Scripts"],
   ["pipeline", "Pipeline"],
 ];
 
+export default function LandCommand() {
+  const [tab, setTab] = useState("home");
+  const [data, setData] = useState({ buyboxes: [], leads: [] });
+  const [loaded, setLoaded] = useState(false);
+  const [prefillBox, setPrefillBox] = useState(null); // handoff: Market Scout → Buy Boxes
+  const [storageOk, setStorageOk] = useState(null);   // null=checking, true=auto-save on, false=unavailable
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [restoreText, setRestoreText] = useState("");
+  const [backupMsg, setBackupMsg] = useState("");
+  const [copiedBackup, setCopiedBackup] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    loadData().then(d => { if (live) { setData(d); setLoaded(true); } });
+    probeStorage().then(ok => { if (live) setStorageOk(ok); });
+    return () => { live = false; };
+  }, []);
+
+  const update = (next) => {
+    setData(next);
+    saveData(next).then(ok => { if (!ok) setStorageOk(false); else if (storageOk === false) setStorageOk(true); });
+  };
+
+  const doRestore = () => {
+    try {
+      const parsed = JSON.parse(restoreText.trim());
+      if (!parsed || typeof parsed !== "object" || (!Array.isArray(parsed.buyboxes) && !Array.isArray(parsed.leads))) {
+        setBackupMsg("That doesn't look like a Land Command backup — paste the full text starting with { and ending with }.");
+        return;
+      }
+      const restored = { buyboxes: parsed.buyboxes || [], leads: parsed.leads || [], settings: parsed.settings || {}, delinq: parsed.delinq || {} };
+      update(restored);
+      setRestoreText("");
+      setBackupMsg(`Restored ✓ — ${restored.buyboxes.length} buy box(es), ${restored.leads.length} lead(s)`);
+      setTimeout(() => setBackupMsg(""), 6000);
+    } catch (e) {
+      setBackupMsg("Couldn't read that backup — make sure you pasted the complete text.");
+    }
+  };
+
+  return (
+    <div className="lc-body" style={{ minHeight: "100vh", background: `${C.paper} radial-gradient(circle at 1px 1px, rgba(20,60,45,.05) 1px, transparent 0) 0 0 / 22px 22px`, color: C.ink }}>
+      <style>{FONTS}{CC_CSS}</style>
+      {/* Command header */}
+      <div className="cc-header">
+        <div className="cc-contour" />
+        <div style={{ position: "relative", maxWidth: 1180, margin: "0 auto", padding: "14px 20px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <span className="cc-dot" />
+            <span className="lc-display" style={{ fontSize: 28, fontWeight: 800, color: "#EAF2EC", letterSpacing: ".1em", textTransform: "uppercase", lineHeight: 1 }}>
+              Land<span style={{ color: CC.phosphor }}>Command</span>
+            </span>
+            <span className="lc-mono" style={{ fontSize: 10, color: CC.phosphorDim, letterSpacing: ".18em", textTransform: "uppercase", borderLeft: `1px solid ${CC.edge}`, paddingLeft: 12 }}>Land Acquisition Control</span>
+            <span className="lc-mono" style={{ marginLeft: "auto", fontSize: 10.5, color: CC.stakeDim, letterSpacing: ".05em" }}>
+              {data.buyboxes.length} BOX · {data.leads.length} LEAD
+            </span>
+            <span className="lc-mono" style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 3, letterSpacing: ".08em", background: storageOk === false ? "#3A2200" : "#0E2A1C", color: storageOk === false ? "#FFC966" : CC.phosphor, border: `1px solid ${storageOk === false ? "#6B4A12" : "#1C4A33"}` }}>
+              {storageOk === false ? "⚠ SAVE OFF" : storageOk ? "● SAVE ON" : "…"}
+            </span>
+            <button type="button" onClick={() => setBackupOpen(!backupOpen)} className="cc-chip"
+              style={{ background: backupOpen ? CC.signal : "transparent", color: backupOpen ? "#0A0F0D" : CC.stakeDim, borderColor: backupOpen ? CC.signal : CC.edge }}>
+              ⛁ BACKUP
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 3, marginTop: 12, flexWrap: "wrap" }}>
+            {TABS.map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setTab(id)} className={"cc-tab lc-display" + (tab === id ? " cc-tab-on" : "")}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {/* Body */}
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "22px 20px 60px" }}>
+        {!loaded ? <div style={{ color: C.faint, fontSize: 14 }}>Loading your saved buy boxes and leads…</div> : (
+          <>
+            {tab === "home" && (
+              <CommandCenterTab data={data} onNavigate={setTab} storageOk={storageOk} onOpenBackup={() => setBackupOpen(true)} />
+            )}
+            {storageOk === false && !backupOpen && tab !== "home" && (
+              <div style={{ background: C.amberPale, border: `1px solid ${C.amber}`, borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.ink, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span><strong>Heads up:</strong> auto-save isn't available in this environment, so your work lives only in this session. Use Backup before you leave — restoring takes 5 seconds.</span>
+                <Btn small onClick={() => setBackupOpen(true)}>Open Backup</Btn>
+              </div>
+            )}
+            {backupOpen && (
+              <div style={{ background: C.panel, border: `2px solid ${C.orange}`, borderRadius: 8, padding: 16, marginBottom: 16 }}>
+                <div className="lc-display" style={{ fontSize: 16, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 4 }}>Backup & restore</div>
+                <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 12 }}>Your entire database — buy boxes, leads, settings, county research — as one block of text. Copy it somewhere safe (notes app, email to yourself). Paste it back anytime, in any session, to pick up exactly where you left off.</div>
+                <div className="lc-label">1 · Backup — copy this</div>
+                <textarea className="lc-input" rows={4} readOnly value={JSON.stringify(data)} onFocus={e => e.target.select()}
+                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, resize: "vertical", marginBottom: 8 }} />
+                <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+                  <Btn small onClick={async () => { await copyText(JSON.stringify(data)); setCopiedBackup(true); setTimeout(() => setCopiedBackup(false), 2000); }}>{copiedBackup ? "Copied ✓" : "Copy backup"}</Btn>
+                </div>
+                <div className="lc-label">2 · Restore — paste a backup here</div>
+                <textarea className="lc-input" rows={4} value={restoreText} onChange={e => setRestoreText(e.target.value)} placeholder='Paste your saved backup text — starts with {"buyboxes":...'
+                  style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, resize: "vertical", marginBottom: 8 }} />
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <Btn small onClick={doRestore}>Restore data</Btn>
+                  {backupMsg && <span style={{ fontSize: 12.5, fontWeight: 700, color: backupMsg.includes("✓") ? C.green : C.red }}>{backupMsg}</span>}
+                </div>
+              </div>
+            )}
+            {tab === "scout" && <MarketScoutTab data={data} update={update} onCreateBox={(co, st) => { setPrefillBox({ counties: co, state: st }); setTab("boxes"); }} />}
+            {tab === "boxes" && <BuyBoxesTab data={data} update={update} prefill={prefillBox} onPrefillConsumed={() => setPrefillBox(null)} />}
+            {tab === "find" && <FindDealsTab data={data} />}
+            {tab === "delinq" && <DelinquencyHubTab data={data} update={update} onGoImport={() => setTab("pipeline")} />}
+            {tab === "match" && <MatchTab data={data} update={update} />}
+            {tab === "pricing" && <PricingTab data={data} update={update} />}
+            {tab === "calls" && <CallScriptsTab settings={data.settings || {}} />}
+            {tab === "pipeline" && <PipelineTab data={data} update={update} />}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 /* ============================================================
-   GUIDED ACQUISITION FUNNEL — first touch → call → diligence →
-   agreement → assign → title/escrow → close. Auto-saved per lead.
+   Shared helpers for outreach + scripts
    ============================================================ */
-const SCRIPTS = {
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand("copy"); } catch (e2) {}
+    document.body.removeChild(ta); return true;
+  }
+}
+
+/* Fills [YOUR NAME]/[PHONE]/[EMAIL] tokens from settings — leaves brackets if not set */
+function fillTokens(text, settings) {
+  if (!text) return text;
+  let t = text;
+  if (settings.myName) t = t.split("[YOUR NAME]").join(settings.myName);
+  if (settings.myPhone) t = t.split("[PHONE]").join(settings.myPhone);
+  if (settings.myEmail) t = t.split("[EMAIL]").join(settings.myEmail);
+  if (settings.myCompany) t = t.split("[COMPANY NAME]").join(settings.myCompany);
+  return t;
+}
+
+/* ============================================================
+   TEXTS & MAILERS — refined bonus campaign (per pipeline lead)
+   Sequenced touches + response handling, auto-filled per lead
+   ============================================================ */
+function buildOutreach(lead, settings, box) {
+  const first = (lead.owner || "").trim().split(/\s+/)[0] || "there";
+  const me = settings.myName || "[YOUR NAME]";
+  const myPhone = settings.myPhone || "[PHONE]";
+  const acres = lead.acres ? `${lead.acres}-acre ` : "";
+  const where = lead.address || (lead.county ? `in ${lead.county} County` : "in the area");
+  const apn = lead.apn ? ` (parcel ${lead.apn})` : "";
+  const offerT = parseFloat(lead.offer || lead.price);
+  const hasOffer = !isNaN(offerT) && offerT > 0;
+  const anchor = hasOffer ? Math.round(offerT * 0.85 / 100) * 100 : null;
+  const fmt = (n) => "$" + Number(n).toLocaleString();
+  const closeDays = box?.closeDays || "30";
+
+  return [
+    {
+      title: "Text #1 — Opener (Day 1)",
+      why: "Short, specific, and asks a yes/no identity question — the easiest possible reply. Naming the lot proves you're not a mass blast.",
+      body: `Hi ${first}, this is ${me}. Are you the owner of the ${acres}vacant lot ${where}${apn}? I'm a local cash buyer and I'd like to make you an offer on it. No agents, no fees on your side.`,
+    },
+    {
+      title: "Text #2 — Bump (Day 4)",
+      why: "Assumes Text #1 got buried, not rejected. The 'even a no helps me close the file' line removes all pressure — and gets replies.",
+      body: `Hi ${first}, ${me} again — just floating my message back up. I'm still interested in the ${acres}lot ${where}. Cash, I cover all closing costs, and we close in about ${closeDays} days. Even a quick "no thanks" helps me close the file. Any interest?`,
+    },
+    {
+      title: "Response playbook — when they text back",
+      why: "Text deals are won in the reply, not the opener. Match their energy: short answers, always end with a question or a next step.",
+      body: `THEM: "How much?"\nYOU: ${hasOffer ? `"Based on recent lot sales nearby I'm around ${fmt(anchor)} cash, as-is, I pay all costs. Walk me through the lot — if access and utilities check out there may be some room. Got 5 minutes for a quick call?"` : `"I'd be guessing without confirming access and utilities — give me 5 minutes on a quick call and I'll give you a real number, not a lowball or a teaser. When's good?"`}\n\nTHEM: "Who is this? / How did you get my number?"\nYOU: "Totally fair question — I'm ${me}, a local land buyer. Your info comes up in county property records tied to the parcel. I only reach out when I'm genuinely interested in buying. Have you ever thought about selling it?"\n\nTHEM: "Not interested."\nYOU: "All good, ${first} — appreciate the straight answer. If anything changes or the taxes ever stop making sense, save my number: ${myPhone}. I'll be buying in the area for a long time."\n\nTHEM: "Make me an offer."\nYOU: ${hasOffer ? `"Happy to. I can do ${fmt(anchor)} cash as-is, all closing costs on me, close in ~${closeDays} days. If the lot checks out better than expected, there's room to talk. Want me to send a simple one-page agreement?"` : `"Will do — give me 24 hours to verify access and utilities so my number is real. What's the best way to send it, text or email?"`}\n\nTHEM: "It's worth way more than that."\nYOU: "On the open market with an agent, maybe — after commissions and months of waiting. What I'm offering is certainty: cash, no fees, ${closeDays}-day close. What number would actually move you?"`,
+    },
+    {
+      title: "Mailer #1 — Postcard (Day 7)",
+      why: "Hits the owners who don't text. The APN on the card is the credibility hook — it reads like real business, not junk mail.",
+      body: `${first !== "there" ? first.toUpperCase() : "PROPERTY OWNER"} — I WANT TO BUY YOUR LAND${apn ? ` ${apn.trim()}` : ""}\n\nI'm a local buyer paying CASH for vacant land ${lead.county ? `in ${lead.county} County` : "in your area"}.\n\n✓ No realtor commissions\n✓ I pay ALL closing costs\n✓ Close in ~${closeDays} days — or on your timeline\n✓ Sell as-is: back taxes, liens, overgrowth — I handle it\n\nCall or text me directly: ${myPhone}\n${me}${settings.myCompany ? ` · ${settings.myCompany}` : ""}\n\n(Not interested? Toss this card — no hard feelings. But if that lot is just a tax bill you pay every year, let's talk.)`,
+    },
+    {
+      title: `Mailer #2 — Offer letter (Day 21)${hasOffer ? "" : " — set 'Your offer' on the lead to auto-fill the numbers"}`,
+      why: "A real number in writing. The range (anchor to target) leaves negotiating room while the certainty pitch does the selling.",
+      body: `Dear ${lead.owner || "Property Owner"},\n\nMy name is ${me}${settings.myCompany ? ` with ${settings.myCompany}` : ""}. I'm writing about your ${acres}vacant land ${where}${apn}.\n\nI'd like to buy your property for cash. ${hasOffer ? `Based on recent sales of similar lots in the area, I'm prepared to offer in the range of ${fmt(anchor)} to ${fmt(offerT)}, depending on a quick review of access and utilities.` : `After a quick review of access and utilities, I can present you a firm cash number within 48 hours of hearing from you.`}\n\nWhat that means for you:\n• CASH — no financing contingencies, no waiting on a bank\n• I pay 100% of closing costs and there are zero commissions\n• We close through a licensed local title company in about ${closeDays} days\n• Completely as-is — overgrowth, back taxes, liens — I deal with all of it\n\nIf the timing isn't right, no problem — keep this letter. But if that land has become a line item you pay taxes on and never visit, call or text me at ${myPhone} and let's turn it into cash.\n\nRespectfully,\n${me}\n${settings.myCompany || ""}\n${myPhone}`,
+    },
+    {
+      title: "Quarterly re-touch text (Day 90+)",
+      why: "Land sellers convert on touch 4–7. This keeps you in their phone without being a pest — markets and circumstances change.",
+      body: `Hi ${first}, ${me} here — I reached out a while back about your ${acres}lot ${where}. Still buying in the area and wanted to check in: any change of heart on selling? Happy to refresh my cash offer either way.`,
+    },
+  ];
+}
+
+function ScriptsPanel({ lead, data, update }) {
+  const settings = data.settings || { myName: "", myPhone: "", myCompany: "", myEmail: "" };
+  const [copied, setCopied] = useState(-1);
+  const box = data.buyboxes.find(b => b.builder === lead.buybox);
+  const sections = buildOutreach(lead, settings, box);
+  const setS = (k) => (e) => update({ ...data, settings: { ...settings, [k]: e.target.value } });
+  return (
+    <div style={{ marginTop: 12, borderTop: `2px solid ${C.line}`, paddingTop: 12 }}>
+      <div className="lc-label" style={{ marginBottom: 6 }}>Text & mailer campaign — auto-filled for this lead · for live calls use the Call Scripts tab</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12, background: C.amberPale, border: `1px solid ${C.amber}`, borderRadius: 6, padding: 10 }}>
+        <Field label="Your name"><input className="lc-input" value={settings.myName || ""} onChange={setS("myName")} placeholder="Mike" /></Field>
+        <Field label="Your phone"><input className="lc-input" value={settings.myPhone || ""} onChange={setS("myPhone")} placeholder="(727) 555-0100" /></Field>
+        <Field label="Company"><input className="lc-input" value={settings.myCompany || ""} onChange={setS("myCompany")} placeholder="Arcadia Land Capital" /></Field>
+        <Field label="Email"><input className="lc-input" value={settings.myEmail || ""} onChange={setS("myEmail")} placeholder="you@..." /></Field>
+      </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        {sections.map((s, i) => (
+          <div key={i} style={{ background: "#FAFBF7", border: `1px solid ${C.line}`, borderRadius: 6, padding: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 4 }}>
+              <span className="lc-display" style={{ fontWeight: 800, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".05em" }}>{s.title}</span>
+              <Btn small kind={copied === i ? "primary" : "ghost"} onClick={async () => { await copyText(s.body); setCopied(i); setTimeout(() => setCopied(-1), 1800); }}>
+                {copied === i ? "Copied ✓" : "Copy"}
+              </Btn>
+            </div>
+            <div style={{ fontSize: 11.5, color: C.green, fontWeight: 600, marginBottom: 8 }}>Why this works: {s.why}</div>
+            <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 13, lineHeight: 1.55, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif" }}>{s.body}</pre>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: C.faint, marginTop: 8 }}>
+        Heads-up: scrub phone lists against the Do Not Call registry and follow TCPA/state texting rules before mass outreach.
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB — PRICING CALC (your original formula system)
+   CMV → My Price → Investor Value → MAO → Gross/Net Spread
+   ============================================================ */
+function PricingTab({ data, update }) {
+  const [cmv, setCmv] = useState("");
+  const [acres, setAcres] = useState("");
+  const [comps, setComps] = useState([{ price: "", acres: "" }, { price: "", acres: "" }, { price: "", acres: "" }]);
+  const [myPct, setMyPct] = useState("35");
+  const [invPct, setInvPct] = useState("65");
+  const [fee, setFee] = useState("10000");
+  const [closing, setClosing] = useState("1500");
+  const [holding, setHolding] = useState("500");
+  const [bufferPct, setBufferPct] = useState("10");
+  const [savedMsg, setSavedMsg] = useState("");
+
+  const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
+  const fmt = (v) => isFinite(v) && !isNaN(v) ? "$" + Math.round(v).toLocaleString() : "—";
+  const pct = (v) => n(cmv) > 0 ? ((v / n(cmv)) * 100).toFixed(1) + "% of CMV" : "";
+
+  const setComp = (i, k, v) => setComps(comps.map((c, j) => j === i ? { ...c, [k]: v } : c));
+  const validComps = comps.filter(c => n(c.price) > 0 && n(c.acres) > 0);
+  const avgPPA = validComps.length ? validComps.reduce((s, c) => s + n(c.price) / n(c.acres), 0) / validComps.length : 0;
+  const compCMV = avgPPA * n(acres);
+
+  const CMV = n(cmv);
+  const myPrice = CMV * n(myPct) / 100;
+  const investorValue = CMV * n(invPct) / 100;
+  const buffer = investorValue * n(bufferPct) / 100;
+  const mao = investorValue - n(fee) - n(closing) - n(holding) - buffer;
+  const gross = investorValue - myPrice;
+  const net = gross - n(fee) - n(closing);
+  const ready = CMV > 0;
+
+  let grade = { label: "—", color: C.faint, bg: "#EEEFEA" };
+  if (ready) {
+    if (myPrice > mao) grade = { label: "OVER MAO — PASS", color: C.red, bg: C.redPale };
+    else if (net >= 10000) grade = { label: "STRONG DEAL", color: C.green, bg: C.greenPale };
+    else if (net > 0) grade = { label: "THIN DEAL — TIGHTEN IT", color: C.amber, bg: C.amberPale };
+    else grade = { label: "NO SPREAD — PASS", color: C.red, bg: C.redPale };
+  }
+
+  const sendToPipeline = () => {
+    const lead = {
+      ...emptyLead(), acres, price: String(Math.round(investorValue)), offer: String(Math.round(myPrice)),
+      source: "Pricing Calc",
+      notes: `CMV ${fmt(CMV)} · My Price ${fmt(myPrice)} (${myPct}%) · Investor ${fmt(investorValue)} (${invPct}%) · MAO ${fmt(mao)} · Net spread ${fmt(net)}`,
+    };
+    update({ ...data, leads: [lead, ...data.leads] });
+    setSavedMsg("Saved to Pipeline ✓ — open the lead and add owner/APN");
+    setTimeout(() => setSavedMsg(""), 5000);
+  };
+
+  return (
+    <div>
+      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Pricing calculator</div>
+      <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Your repeatable valuation chain: CMV → My Price → Investor Value → MAO → spread. Run it on every lot before you name a number.</div>
+
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18 }}>
+        <SectionHead>Step 1 — Current market value (CMV)</SectionHead>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <Field label="CMV ($) — from comps, Zillow, or assessor"><input className="lc-input" type="number" value={cmv} onChange={e => setCmv(e.target.value)} placeholder="60000" /></Field>
+          <Field label="Subject lot acres (for comps helper)"><input className="lc-input" type="number" value={acres} onChange={e => setAcres(e.target.value)} placeholder="0.25" /></Field>
+        </div>
+        <div style={{ marginTop: 12, background: "#FAFBF7", border: `1px dashed ${C.line}`, borderRadius: 6, padding: 12 }}>
+          <div className="lc-label">Comps helper (optional) — sold lots, same zip, last 12 mo</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {comps.map((c, i) => {
+              const ppa = n(c.price) > 0 && n(c.acres) > 0 ? n(c.price) / n(c.acres) : 0;
+              return (
+                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px", gap: 8, alignItems: "center" }}>
+                  <input className="lc-input" type="number" placeholder={`Comp ${i + 1} sold price ($)`} value={c.price} onChange={e => setComp(i, "price", e.target.value)} />
+                  <input className="lc-input" type="number" placeholder="Acres" value={c.acres} onChange={e => setComp(i, "acres", e.target.value)} />
+                  <span className="lc-mono" style={{ fontSize: 12, color: ppa ? C.green : C.faint, fontWeight: 600 }}>{ppa ? `$${Math.round(ppa).toLocaleString()}/ac` : "—"}</span>
+                </div>
+              );
+            })}
+          </div>
+          {compCMV > 0 && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
+              <span className="lc-mono" style={{ fontSize: 13, fontWeight: 600 }}>Comp-based CMV: {fmt(compCMV)}</span>
+              <Btn small onClick={() => setCmv(String(Math.round(compCMV)))}>Use as CMV →</Btn>
+            </div>
+          )}
+        </div>
+
+        <SectionHead>Step 2 — Your percentages</SectionHead>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+          <Field label="My Price % of CMV (offer to seller)"><input className="lc-input" type="number" value={myPct} onChange={e => setMyPct(e.target.value)} placeholder="35" /></Field>
+          <Field label="Investor Buy % of CMV (builder pays)"><input className="lc-input" type="number" value={invPct} onChange={e => setInvPct(e.target.value)} placeholder="65" /></Field>
+        </div>
+        <div style={{ fontSize: 11.5, color: C.faint, marginTop: 8 }}>Your model: offer sellers 30–50% of CMV; builders/investors typically buy at 60–70%. Adjust per market heat.</div>
+
+        <SectionHead>Step 3 — Costs & safety</SectionHead>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+          <Field label="Assignment fee target ($)"><input className="lc-input" type="number" value={fee} onChange={e => setFee(e.target.value)} /></Field>
+          <Field label="Closing costs ($)"><input className="lc-input" type="number" value={closing} onChange={e => setClosing(e.target.value)} /></Field>
+          <Field label="Holding costs ($)"><input className="lc-input" type="number" value={holding} onChange={e => setHolding(e.target.value)} /></Field>
+          <Field label="Safety buffer (% of Investor Value)"><input className="lc-input" type="number" value={bufferPct} onChange={e => setBufferPct(e.target.value)} /></Field>
+        </div>
+      </div>
+
+      {ready && (
+        <div style={{ background: C.ink, borderRadius: 8, padding: 20, color: "#fff", marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+            <div className="lc-display" style={{ fontSize: 16, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: C.orange }}>Deal breakdown</div>
+            <span className="lc-stamp" style={{ color: grade.color, fontSize: 14, background: grade.bg, borderRadius: 4 }}>{grade.label}</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
+            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>CMV</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600 }}>{fmt(CMV)}</div></div>
+            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>My Price (offer seller)</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600, color: C.orange }}>{fmt(myPrice)}</div><div style={{ fontSize: 10.5, color: "#9DAB9F" }}>{pct(myPrice)}</div></div>
+            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>Investor Value (builder pays)</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600 }}>{fmt(investorValue)}</div><div style={{ fontSize: 10.5, color: "#9DAB9F" }}>{pct(investorValue)}</div></div>
+            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>MAO — never exceed</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600, color: myPrice > mao ? "#E8A6A0" : "#7FD8A4" }}>{fmt(mao)}</div><div style={{ fontSize: 10.5, color: "#9DAB9F" }}>{pct(mao)}</div></div>
+            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>Gross spread</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600 }}>{fmt(gross)}</div></div>
+            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>Net spread (take-home)</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600, color: net >= 10000 ? "#7FD8A4" : net > 0 ? "#F2CD88" : "#E8A6A0" }}>{fmt(net)}</div></div>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
+            <Btn onClick={sendToPipeline}>+ Save deal to Pipeline</Btn>
+            <Btn kind="ghost" onClick={async () => { await copyText(`CMV: ${fmt(CMV)}\nMy Price (${myPct}%): ${fmt(myPrice)}\nInvestor Value (${invPct}%): ${fmt(investorValue)}\nMAO: ${fmt(mao)}\nGross spread: ${fmt(gross)}\nNet spread: ${fmt(net)}\nGrade: ${grade.label}`); setSavedMsg("Breakdown copied ✓"); setTimeout(() => setSavedMsg(""), 2500); }}>Copy breakdown</Btn>
+            {savedMsg && <span style={{ fontSize: 13, fontWeight: 700, color: "#7FD8A4" }}>{savedMsg}</span>}
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16, marginTop: 14 }}>
+        <div className="lc-label" style={{ marginBottom: 10 }}>Formula reference</div>
+        {[
+          ["My Price", "CMV × My Price %", "What you offer the motivated seller"],
+          ["Investor Value", "CMV × Investor Buy %", "What your cash buyer / builder will pay"],
+          ["MAO", "Investor Value − Assignment Fee − Closing − Holding − Buffer", "Your absolute ceiling — never exceed this"],
+          ["Gross Spread", "Investor Value − My Price", "Potential profit before fees"],
+          ["Net Spread", "Gross Spread − Assignment Fee − Closing Costs", "Your take-home on the deal"],
+        ].map(([name, formula, desc]) => (
+          <div key={name} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.line}` }}>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>{name}</span>
+            <span className="lc-mono" style={{ fontSize: 12, color: C.green, margin: "0 8px" }}>{formula}</span>
+            <span style={{ fontSize: 12, color: C.faint }}>{desc}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   CALL SCRIPTS — your original 4-script system (verbatim)
+   Scripts 1 & 2 + 4 imported word-for-word from your files.
+   Script 3 (Title) rebuilt from your original chat — proof it.
+   ============================================================ */
+const BUYER_SELLER_SCRIPTS = {
   builder: {
     id: "builder",
     label: "Script 1",
@@ -1414,1955 +1807,2118 @@ const SCRIPTS = {
   },
 };
 
-function titleScript(lead, settings, box) {
-  const me = settings.myName || "Deivan";
-  const co = settings.myCompany || "our company";
-  const closeDays = (box && box.closeDays) || "30";
-  return { title: "Title & Escrow — opening call", body:
-`"Hi, this is ${me} with ${co}. I have a signed purchase agreement on a vacant lot — parcel ${lead.apn || "(APN)"} in ${lead.county || "(county)"} County — and I'd like to open title and escrow.\n\n• It's a cash purchase, closing in about ${closeDays} days; buyer pays all closing costs.\n• Please run a title search / commitment and flag any liens, easements, back taxes, or access issues.\n• Send the commitment to me and both parties, and let me know earnest-money wiring instructions.\n\nWhat do you need from me to get started today?"` };
-}
+const ATTORNEY_SCRIPT = {
+  id: "attorney",
+  label: "Script 4",
+  title: "Real Estate Attorney Outreach",
+  goal: "Find a state-licensed real estate attorney to draft your land purchase & sale agreement, assignment of contract, and double close agreement — once per state.",
+  accent: "#e879f9",
+  badge: "LEGAL SIDE",
+  steps: [
+    {
+      id: "gatekeeper",
+      label: "Gatekeeper",
+      icon: "🚪",
+      intro: "Law offices almost always have a receptionist or legal assistant screening calls. Your goal is to get to the attorney directly, or schedule a consultation. You are a potential paying client — carry yourself accordingly.",
+      blocks: [
+        {
+          type: "say",
+          label: "Opening Line",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi, my name is [YOUR NAME]. I'm a real estate investor and I'm looking to speak with one of your real estate attorneys about drafting some transaction documents specific to [STATE]. Is there someone I can speak with, or would I need to schedule a consultation?"`,
+        },
+        {
+          type: "tip",
+          label: "Who You're Looking For",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "You want an attorney who specifically handles real estate transactions — not general practice. If the firm does multiple areas of law, ask specifically for their real estate transactional attorney, not a litigator.",
+        },
+      ],
+      rebuttals: [
+        {
+          them: `"What kind of documents are you looking for?"`,
+          you: `"I need a land purchase and sale agreement, an assignment of contract, and a double close agreement — all drafted for [STATE] specifically. I wholesale vacant land and I want to make sure my contracts are legally sound in every state I operate in."`,
+        },
+        {
+          them: `"You'll need to schedule a paid consultation first."`,
+          you: `"Completely understand — I'm happy to do that. What does that look like, and how long is a typical consultation? I want to make sure we cover everything in one sitting."`,
+        },
+        {
+          them: `"We don't handle that type of work."`,
+          you: `"No problem at all — do you happen to know of a firm in [STATE/AREA] that specializes in real estate transactions? I want to make sure I'm working with someone who knows the state-specific requirements."`,
+        },
+        {
+          them: `"Can I take your information?"`,
+          you: `"Of course — [YOUR NAME], [PHONE], [EMAIL]. And could I get the attorney's name and a direct line or email so I can follow up if I don't hear back within a day or two?"`,
+        },
+      ],
+      comeback: [
+        "Attorney's name confirmed",
+        "Direct number or email",
+        "Consultation cost and length",
+        "Confirmation they handle real estate transactions in that state",
+      ],
+    },
+    {
+      id: "opener",
+      label: "Opener",
+      icon: "🎙",
+      intro: "You've reached the attorney directly or been transferred through. Lead with clarity — you know what you need, you're a paying client, and this is a one-time engagement per state with potential for repeat work as you expand.",
+      blocks: [
+        {
+          type: "say",
+          label: "Opening Line",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi [ATTORNEY NAME], my name is [YOUR NAME]. I'm a land wholesaler — I buy vacant lots off-market and resell them to builders and developers. I'm actively working deals in [STATE] and I need to make sure I have legally sound contracts specific to your state laws before I close my first transaction here. I'm looking to hire an attorney to draft those documents for me, and I want to do it right the first time."`,
+        },
+        {
+          type: "tip",
+          label: "Why This Framing Works",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "Attorneys respect clients who know what they want and come prepared. You're not asking vague questions — you're telling them exactly what you need and signaling that you're a serious, paying client. Mention future states casually — it signals recurring business.",
+        },
+        {
+          type: "say",
+          label: "Transition",
+          color: "#3b82f6",
+          bg: "#0f1e30",
+          text: `"I have a few questions to make sure you're the right fit — and then I'd like to talk about moving forward. Do you have a few minutes?"`,
+        },
+      ],
+      rebuttals: [
+        {
+          them: `"What exactly is wholesaling?"`,
+          you: `"Sure — I get a vacant lot under contract with the seller, then either assign that contract to my end buyer, or do a double close where I buy and resell on the same day. I need contracts that cover both structures and hold up in [STATE]."`,
+        },
+        {
+          them: `"I'm not familiar with assignment of contract in this context."`,
+          you: `"That's actually one of the reasons I want an attorney involved — I want to make sure the language is airtight for this state. It's a fairly straightforward real estate assignment, but state laws vary and I don't want to assume anything."`,
+        },
+      ],
+      comeback: [],
+    },
+    {
+      id: "questions",
+      label: "Key Questions",
+      icon: "📋",
+      intro: "Before you commit to hiring them, qualify the attorney. Not every real estate attorney handles transactional investor work — some only do closings, litigation, or residential. These questions tell you fast if they're the right fit.",
+      blocks: [],
+      questions: [
+        { q: "Do you handle real estate transactional work for investors specifically, or is your practice focused more on closings and litigation?", why: "You need a transactional attorney, not someone who only handles disputes or title issues." },
+        { q: "Are you licensed and practicing in [STATE]?", why: "Contracts must be drafted by an attorney licensed in the state where the transaction occurs." },
+        { q: "Have you drafted purchase and sale agreements for vacant land transactions before?", why: "Land contracts differ from residential — you want someone with direct experience." },
+        { q: "Are you familiar with assignment of contract structures used in wholesaling?", why: "Some attorneys aren't investor-friendly — better to know now than after you've paid a retainer." },
+        { q: "Have you handled double close or simultaneous closing agreements?", why: "This is the more complex structure — you need to know if they've done it before." },
+        { q: "Are there any legal restrictions in [STATE] that would affect wholesaling, assignments, or double closes I should know about?", why: "Some states have restrictions on contract assignments or require a license — your attorney should know this cold." },
+        { q: "Would you be drafting these from scratch or working from templates you've used before?", why: "From scratch takes longer and costs more — templates they've used before are already tested and cheaper to customize." },
+        { q: "What's your typical turnaround time once I provide the deal details and we agree to move forward?", why: "You may need contracts fast — you need to know their bandwidth." },
+      ],
+      rebuttals: [],
+      comeback: [],
+    },
+    {
+      id: "scope",
+      label: "Scope of Work",
+      icon: "📝",
+      intro: "Once you've confirmed they're the right fit, clearly define the three documents you need. Be specific — vague asks lead to vague deliverables and scope creep on the bill.",
+      blocks: [
+        {
+          type: "say",
+          label: "Define What You Need",
+          color: "#e879f9",
+          bg: "#1a0a1f",
+          text: `"Here's exactly what I'm looking to have drafted. I need three documents, all specific to [STATE] law:\n\nOne — a Vacant Land Purchase and Sale Agreement to use when I'm buying from a seller. It needs to cover purchase price, earnest money, inspection period, closing timeline, contingencies, and an assignability clause.\n\nTwo — an Assignment of Contract agreement so I can assign my buyer position to my end buyer in lieu of a double close when that structure makes more sense.\n\nThree — a Double Close or Back-to-Back Closing agreement that covers both Transaction A and Transaction B — the buy and the resell — and is structured so my profit stays protected.\n\nI want all three to be clean, plain-language, and something I can use repeatedly without having to call an attorney every time I have a deal."`,
+        },
+        {
+          type: "tip",
+          label: "Assignability Clause — Make Sure It's In There",
+          color: "#ef4444",
+          bg: "#2a0f0f",
+          text: `Your Purchase & Sale Agreement MUST include language that makes the contract assignable — something like "and/or assigns" after your name as the buyer. Without this, you can't legally assign the contract to your end buyer. Make sure your attorney knows this is non-negotiable.`,
+        },
+        {
+          type: "tip",
+          label: "Plain Language Matters",
+          color: "#f59e0b",
+          bg: "#1f1500",
+          text: "Ask for plain language — not legalese. You'll be presenting these to land owners who are regular people, not attorneys. A clean, readable contract builds trust and speeds up the signing process.",
+        },
+      ],
+      rebuttals: [
+        {
+          them: `"I'd need to review the details before I can draft anything."`,
+          you: `"Completely understood — I'm not asking you to start today. I just want to confirm the scope so you can give me a quote and we can agree on the engagement. Once we're aligned on cost and timeline, I'll get you everything you need."`,
+        },
+        {
+          them: `"We don't typically draft assignment agreements for wholesalers."`,
+          you: `"I understand that's not always common. To be clear — this isn't an agreement to help me avoid licensing requirements. This is a standard real estate assignment of contract used in a lawful transaction. I'm happy to walk through the specifics if it helps clarify."`,
+        },
+        {
+          them: `"You could probably find templates online."`,
+          you: `"I've seen those — and I'd rather pay for something that's been reviewed by an attorney who knows [STATE] law specifically. Generic templates have gaps, and one bad contract could cost me far more than your fee. I want to do this right."`,
+        },
+      ],
+      comeback: [],
+    },
+    {
+      id: "fees",
+      label: "Fees & Process",
+      icon: "💰",
+      intro: "Get a clear picture of what this engagement will cost and how the process works before you commit.",
+      blocks: [
+        {
+          type: "say",
+          label: "Ask About Fees",
+          color: "#f59e0b",
+          bg: "#1f1500",
+          text: `"Before we go further — can you give me a sense of what drafting these three documents would typically cost? And do you charge a flat fee for this type of work, or is it billed hourly?"`,
+        },
+      ],
+      questions: [
+        { q: "Do you charge a flat fee or hourly for contract drafting?", why: "Flat fee = predictable cost. Hourly = open-ended bill. Always prefer flat fee for defined scope work." },
+        { q: "Is there a separate consultation fee, and does it apply toward the drafting cost if I move forward?", why: "Some attorneys credit the consult fee — others don't. Know before you agree to a paid consult." },
+        { q: "What information do you need from me to get started once we agree to move forward?", why: "Be ready to provide it fast — delays on your end extend the timeline." },
+        { q: "Will I have the opportunity to review and request revisions before the documents are finalized?", why: "You want at least one round of revisions included — don't assume it is." },
+        { q: "Once these are drafted, can I use them for multiple transactions, or do they need to be updated per deal?", why: "You want reusable templates — not something you pay to redraft every closing." },
+        { q: "If I expand into other states down the road, would you be able to adapt these for those states or refer me to someone who can?", why: "Plants the seed for a long-term relationship and recurring business across your expansion markets." },
+      ],
+      rebuttals: [
+        {
+          them: `"Our rates are [HIGH NUMBER] per hour."`,
+          you: `"I appreciate the transparency. Is there any flexibility on a flat fee for a defined scope like this — three documents, one round of revisions? I'd rather agree on a number upfront than have an open invoice."`,
+        },
+        {
+          them: `"I'd need a retainer before we begin."`,
+          you: `"Understood — what does that retainer look like, and how is it applied toward the total cost?"`,
+        },
+        {
+          them: `"This might take a few weeks."`,
+          you: `"I can work with that. Is there anything I can provide upfront to help move it along faster once we agree to engage?"`,
+        },
+      ],
+      comeback: [
+        "Attorney name, direct number, and email confirmed",
+        "Licensed in target state confirmed",
+        "Familiar with assignments and double closes — confirmed",
+        "Flat fee or hourly rate noted",
+        "Retainer requirement noted",
+        "Turnaround timeline noted",
+        "Revision policy confirmed",
+        "Next step agreed upon — consult scheduled or quote incoming",
+      ],
+    },
+    {
+      id: "close",
+      label: "Close the Call",
+      icon: "🤝",
+      intro: "You've qualified them and discussed scope. End the call with a clear next step — either a scheduled consultation or a written quote.",
+      blocks: [
+        {
+          type: "say",
+          label: "If You're Ready to Move Forward",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"This sounds like a great fit. Here's what I'd like to do — let's schedule a formal consultation so I can walk you through the exact deal structure I use and you can ask any questions before you start drafting. What does your availability look like this week or next?"`,
+        },
+        {
+          type: "say",
+          label: "If You Need a Quote First",
+          color: "#3b82f6",
+          bg: "#0f1e30",
+          text: `"Before I commit, would you be able to put together a flat fee quote for the three documents based on what we discussed? I want to move quickly but I'd like to see a number in writing first. Can you email that to me at [EMAIL]?"`,
+        },
+        {
+          type: "say",
+          label: "Either Way — Confirm the Relationship",
+          color: "#e879f9",
+          bg: "#1a0a1f",
+          text: `"I'll also say — I plan to expand into additional states as my business grows. If this first engagement goes well, you'd be my first call every time I enter a new market. I'd rather build a long-term relationship with one attorney I trust than shop around every time."`,
+        },
+        {
+          type: "tip",
+          label: "After the Call",
+          color: "#f59e0b",
+          bg: "#1f1500",
+          text: "Send a follow-up email the same day summarizing: your name, your business model in 2 sentences, the three documents you need, the state, and your timeline. This gives them everything in writing and makes it easy for them to quote you accurately.",
+        },
+      ],
+      rebuttals: [
+        {
+          them: `"I'll have my assistant follow up with you."`,
+          you: `"Perfect — just to make sure nothing slips through, can you confirm my email is [EMAIL]? And roughly when should I expect to hear back?"`,
+        },
+        {
+          them: `"We're pretty backed up right now."`,
+          you: `"Understood. Would you be able to give me a realistic timeline so I can plan around it? And if it's going to be more than two weeks, is there someone else at the firm who might be able to start sooner?"`,
+        },
+      ],
+      comeback: [],
+    },
+    {
+      id: "voicemail",
+      label: "Voicemail",
+      icon: "📱",
+      intro: "Law offices screen calls carefully. Leave something that immediately signals you're a paying client with a specific, defined need.",
+      blocks: [
+        {
+          type: "say",
+          label: "Leave This",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi, this message is for [ATTORNEY NAME] — my name is [YOUR NAME]. I'm a real estate investor wholesaling vacant land in [STATE] and I'm looking to hire an attorney to draft three transaction documents specific to your state: a purchase and sale agreement, an assignment of contract, and a double close agreement. I'd like to schedule a consultation at your earliest convenience. You can reach me at [PHONE]. Again, [YOUR NAME] at [PHONE]. Thank you."`,
+        },
+        {
+          type: "tip",
+          label: "Voicemail Rules",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "Name the three documents specifically — it proves you know what you need and aren't fishing for free legal advice. Say your number twice. Under 30 seconds.",
+        },
+      ],
+      rebuttals: [],
+      comeback: [],
+    },
+  ],
+};
 
-function FunnelScript({ title, body }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 14, marginBottom: 10 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <span className="lc-display" style={{ fontWeight: 800, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em" }}>{title}</span>
-        <button onClick={async () => { await copyText(body); setCopied(true); setTimeout(() => setCopied(false), 1600); }}
-          style={{ padding: "5px 12px", borderRadius: 6, border: `1px solid ${C.line}`, background: copied ? C.green : "#fff", color: copied ? "#fff" : C.ink, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy"}</button>
-      </div>
-      <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 13, lineHeight: 1.55, color: C.ink, fontFamily: "'Inter',system-ui,sans-serif" }}>{body}</pre>
-    </div>
-  );
-}
+/* Script 3 — Title Company Outreach (rebuilt from your original chat) */
+const TITLE_SCRIPT = {
+  id: "title",
+  label: "Script 3",
+  title: "Title Company Outreach",
+  goal: "Introduce yourself, find your go-to contact, confirm they handle land & double closes, and lock in fees and timelines.",
+  accent: "#10b981",
+  accentDim: "#0a2a1f",
+  badge: "TITLE SIDE",
+  badgeColor: "#10b981",
+  steps: [
+    {
+      id: "gatekeeper",
+      label: "Gatekeeper",
+      icon: "🚪",
+      intro: "Most title companies have a receptionist or front desk who answers first. Your goal is to get to a closer, escrow officer, or the branch manager — whoever handles land transactions.",
+      blocks: [
+        {
+          type: "say",
+          label: "Opening Line",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi, my name is [YOUR NAME]. I'm a land investor and I'm looking to connect with whoever handles your land or vacant lot closings — is that someone I can speak with today?"`,
+        },
+        {
+          type: "tip",
+          label: "Who You're Looking For",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "You want: a Closing Officer, Escrow Officer, Title Officer, or the Branch Manager. Any of these can become your go-to contact. Avoid getting routed to a generic 'sales' line.",
+        },
+      ],
+      rebuttals: [
+        {
+          them: `"What is this regarding?"`,
+          you: `"Sure — I'm a land investor closing deals in this area and I want to establish a relationship with a title company I can bring my transactions to consistently. I just want to make sure you're set up to handle vacant land and talk through the process."`,
+        },
+        {
+          them: `"Can I take your information and have someone call you back?"`,
+          you: `"Absolutely. [YOUR NAME], [PHONE]. I'd also love to know — who specifically would be reaching out? I'd like to have a name so I know who to expect."`,
+        },
+        {
+          them: `"We're pretty busy right now."`,
+          you: `"No problem at all. Is there a better time today or tomorrow to catch someone for just 5 minutes? I close multiple deals and I'm looking for a title company to build a long-term relationship with."`,
+        },
+      ],
+      comeback: [
+        "Name of closer or escrow officer",
+        "Direct number or extension",
+        "Email address",
+        "Best time to reach them",
+      ],
+    },
+    {
+      id: "opener",
+      label: "Opener",
+      icon: "🎙",
+      intro: "You've reached a closer, escrow officer, or branch manager. Lead with who you are and why consistent business from you is worth 5 minutes of their time.",
+      blocks: [
+        {
+          type: "say",
+          label: "Opening Line",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi [NAME], my name is [YOUR NAME] — I'm a land investor based in [AREA] and I'm actively buying and selling vacant lots in [MARKET/COUNTY]. I'm reaching out because I want to find one title company I can bring all of my transactions to consistently, and I wanted to have a quick conversation to make sure we're a good fit for each other."`,
+        },
+        {
+          type: "tip",
+          label: "Why This Framing Works",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "You're not asking for a favor — you're offering recurring business. Title companies love investors who close multiple deals. Position yourself as a volume client from the start, even if you're just getting going.",
+        },
+        {
+          type: "say",
+          label: "Transition Into Questions",
+          color: "#3b82f6",
+          bg: "#0f1e30",
+          text: `"I just have a few quick questions to make sure your office handles the type of deals I do — do you have 5 minutes?"`,
+        },
+      ],
+      rebuttals: [
+        {
+          them: `"We mostly handle residential — not sure about vacant land."`,
+          you: `"That's actually exactly why I'm asking — vacant land closings are a little different and I want to make sure I'm working with someone who's comfortable with them. Do you handle any land transactions currently, or is it mostly improved properties?"`,
+        },
+        {
+          them: `"What kind of volume are you doing?"`,
+          you: `"I'm building my pipeline right now — my goal is to close [X] transactions in this market over the next 12 months. I'd rather grow with one reliable title company than shop around every deal."`,
+        },
+      ],
+      comeback: [],
+    },
+    {
+      id: "questions",
+      label: "Key Questions",
+      icon: "📋",
+      intro: "Work through these to qualify the title company and show you know what you're doing. These also double as the information you need to actually run your business.",
+      blocks: [],
+      questions: [
+        { q: "Do you handle vacant land and lot closings regularly?", why: "Some title companies rarely touch land — you need one that's comfortable with it." },
+        { q: "Are you able to handle double closings or simultaneous closings?", why: "Critical for your business model — you're buying from the land owner and selling to the builder, sometimes on the same day." },
+        { q: "Do you require seasoning on the title, or can you close back-to-back transactions on the same parcel?", why: "Some title companies have seasoning requirements that could block a same-day double close." },
+        { q: "What does your title search process look like for vacant land — how far back do you search and how long does it take?", why: "Land titles can have old liens, easements, or heirship issues. You need to know their process and timeline." },
+        { q: "Can you run a preliminary title search before I'm fully under contract — and is there a cost for that?", why: "A prelim search helps you spot problems before you're locked in with a seller." },
+        { q: "What are your typical closing fees for a vacant land transaction?", why: "You need to factor this into your deal math — both on the buy and sell side." },
+        { q: "Do you handle both sides of the transaction, or do the buyer and seller each need their own title company?", why: "In a double close you may need them to handle both sides — not all companies do this." },
+        { q: "What's your typical turnaround time from opening escrow to clear-to-close on a land deal?", why: "Builders and sellers both have timelines — you need to know how fast you can move." },
+        { q: "Do you work with cash buyers and sellers who don't have an agent involved?", why: "Most of your deals will be agent-free — you want to confirm they're comfortable with that." },
+        { q: "Is there a specific closer or escrow officer I should always ask for when I bring a deal in?", why: "Builds your direct relationship — you want one person who knows your name and how you work." },
+      ],
+      rebuttals: [],
+      comeback: [],
+    },
+    {
+      id: "doubleclose",
+      label: "Double Close Deep Dive",
+      icon: "🔁",
+      intro: "If they confirmed they handle double closings, go deeper. This is one of the most important parts of your business model and you need to know exactly how they handle it.",
+      blocks: [
+        {
+          type: "tip",
+          label: "What a Double Close Is",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "You buy the land from the seller (Transaction A), then immediately resell it to the builder (Transaction B) — sometimes the same day. Your profit is the spread. Not all title companies allow this or know how to process it cleanly.",
+        },
+        {
+          type: "say",
+          label: "Ask This",
+          color: "#10b981",
+          bg: "#0a1f18",
+          text: `"Just to make sure I understand your process on double closes — when I'm buying from the seller and selling to my builder on the same day, can the proceeds from Transaction B be used to fund Transaction A? Or do I need to bring my own funds to the first closing?"`,
+        },
+        {
+          type: "tip",
+          label: "Why This Matters",
+          color: "#ef4444",
+          bg: "#2a0f0f",
+          text: "If they require you to fund Transaction A independently, you'll need transactional funding or a gap funder. If they allow B to fund A — it's cleaner and cheaper. Know this before you bring them a deal.",
+        },
+        {
+          type: "say",
+          label: "Follow Up With",
+          color: "#10b981",
+          bg: "#0a1f18",
+          text: `"And do you have any issue with the assignment of contract, or do you prefer a double close over an assignment on deals like these?"`,
+        },
+      ],
+      rebuttals: [
+        {
+          them: `"We don't do double closings."`,
+          you: `"I appreciate you being upfront about that. Do you handle assignment of contracts then — where I assign my purchase agreement to my end buyer before closing? That's the other structure I use."`,
+        },
+        {
+          them: `"We'd need you to bring your own funds to the A transaction."`,
+          you: `"Understood — I work with transactional lenders for that. As long as both closings can happen the same day, that works on my end. Can you accommodate same-day back-to-back closings?"`,
+        },
+        {
+          them: `"We're not familiar with that structure."`,
+          you: `"No problem — it's not uncommon, just more common with investors than retail buyers. Would you be open to talking through it with your title attorney so we know what's possible before I bring a deal in?"`,
+        },
+      ],
+      comeback: [],
+    },
+    {
+      id: "fees",
+      label: "Fees & Timeline",
+      icon: "💰",
+      intro: "Get the numbers you need to build your deal math correctly. Don't be shy about this — knowing their fees makes you look experienced, not cheap.",
+      blocks: [
+        {
+          type: "say",
+          label: "Open the Conversation",
+          color: "#f59e0b",
+          bg: "#1f1500",
+          text: `"I want to make sure I'm accounting for title costs accurately when I put deals together. Can you walk me through what a typical closing would cost on a vacant land transaction — both on the buy side when I'm acquiring from a seller, and on the sell side when I'm closing with my builder?"`,
+        },
+      ],
+      questions: [
+        { q: "What is your base closing/settlement fee for a land transaction?", why: "Your core cost — usually flat fee per closing side." },
+        { q: "Is there a separate fee for the title search and title examination?", why: "Often charged separately from the settlement fee." },
+        { q: "Do you charge for title insurance on both sides, and is it required?", why: "Lender's policy vs owner's policy — on a cash deal you may be able to waive lender's policy." },
+        { q: "Are there any additional fees for a double close or back-to-back transaction?", why: "Some companies charge extra for the complexity — you need to know upfront." },
+        { q: "Who typically pays what — is it negotiable between buyer and seller?", why: "In your deals you'll often be controlling both sides — you want flexibility." },
+        { q: "What's your typical timeline from contract to close once escrow is opened?", why: "Plan your deals around their turnaround, not the other way around." },
+      ],
+      rebuttals: [
+        {
+          them: `"It depends on the deal — hard to say."`,
+          you: `"Totally understand. Could you give me a ballpark on a straightforward cash land deal — say a lot worth $50,000? I just want a rough number to work with when I'm building my offers."`,
+        },
+        {
+          them: `"We charge more for investor transactions."`,
+          you: `"That's fair — can you tell me what that looks like so I can plan accordingly? And does that fee go down at all with volume as we close more deals together?"`,
+        },
+      ],
+      comeback: [
+        "Base closing/settlement fee confirmed",
+        "Title search fee noted",
+        "Double close fee (if any) noted",
+        "Typical timeline from open to close",
+        "Who pays what — buyer vs seller default",
+      ],
+    },
+    {
+      id: "close",
+      label: "Close the Call",
+      icon: "🤝",
+      intro: "You've got what you need. Now lock in the relationship and set yourself up to bring them your first deal.",
+      blocks: [
+        {
+          type: "say",
+          label: "Closing Line",
+          color: "#10b981",
+          bg: "#0a1f18",
+          text: `"This has been really helpful, [NAME] — I feel good about how your office operates. Here's what I'd like to do: I'll send you a quick email to introduce myself formally and have your contact info on file. When my next deal comes together in [MARKET], I'll reach out to you directly to open escrow. Does that work?"`,
+        },
+        {
+          type: "say",
+          label: "Confirm Their Info",
+          color: "#10b981",
+          bg: "#0a1f18",
+          text: `"What's the best email to reach you at directly? And do you have a direct line or extension — I'd rather not go through the front desk every time I bring you a deal."`,
+        },
+        {
+          type: "tip",
+          label: "After the Call",
+          color: "#f59e0b",
+          bg: "#1f1500",
+          text: "Send a same-day follow-up email: who you are in 2 sentences, the markets you're buying in, and that you'll be opening escrow with them on your next deal. Now you're a name they recognize, not a cold file.",
+        },
+      ],
+      rebuttals: [],
+      comeback: [
+        "Go-to closer's name + direct line locked in",
+        "Direct email confirmed",
+        "Same-day intro email sent",
+        "Double close / assignment capability confirmed",
+        "Fee ballpark documented for deal math",
+      ],
+    },
+    {
+      id: "voicemail",
+      label: "Voicemail",
+      icon: "📱",
+      intro: "If you can't reach a closer, leave a message that sounds like recurring business walking in the door — not a cold inquiry.",
+      blocks: [
+        {
+          type: "say",
+          label: "Leave This",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi, this message is for whoever handles your land closings — my name is [YOUR NAME]. I'm a land investor actively buying and selling vacant lots in [MARKET/COUNTY], and I'm looking for one title company to bring all of my transactions to on a consistent basis. I'd love 5 minutes to make sure we're a fit. You can reach me at [PHONE] — again, [YOUR NAME] at [PHONE]. Thank you."`,
+        },
+        {
+          type: "tip",
+          label: "Voicemail Rules",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "Lead with recurring business — 'all of my transactions' is the phrase that gets callbacks. Say your number twice. Under 25 seconds.",
+        },
+      ],
+      rebuttals: [],
+      comeback: [],
+    },
+  ],
+};
 
-function FunnelComps({ lead }) {
-  const [res, setRes] = useState(null);
-  useEffect(() => {
-    let live = true;
-    if (lead.lat == null || lead.lng == null) { setRes({ unsupported: true }); return; }
-    fetchComps(lead.lat, lead.lng, parseFloat(lead.acres) || 0, lead.pstate, "").then(r => { if (live) setRes(r); });
-    return () => { live = false; };
-  }, [lead.id]);
-  const box = { background: "#161d2e", border: "1px solid #1e2a3a", borderRadius: 10, padding: 16, marginBottom: 14 };
-  if (!res) return <div style={box}><span style={{ color: "#64748b", fontSize: 13 }}>◌ Pulling live comps for this lot…</span></div>;
-  if (res.unsupported) return <div style={box}><span style={{ color: "#64748b", fontSize: 13 }}>Live comps run on Florida parcels today (its data carries sale price + date). Other states need a sales feed.</span></div>;
-  if (res.timeout) return <div style={box}><span style={{ color: "#64748b", fontSize: 13 }}>Comp service was slow — reopen this lead to retry.</span></div>;
-  return (
-    <div style={box}>
-      <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 12 }}>📊 Live Comps — back up your number</div>
-      <CompsColumns res={res} pal={{ accent: "#f59e0b", dim: "#64748b", text: "#e2e8f0", line: "#1e2a3a", panel: "#13181f", hot: "#1f1500" }} />
-    </div>
-  );
-}
+const CALL_SCRIPTS = {
+  builder: BUYER_SELLER_SCRIPTS.builder,
+  seller: BUYER_SELLER_SCRIPTS.seller,
+  title: TITLE_SCRIPT,
+  attorney: { ...ATTORNEY_SCRIPT, accentDim: "#2a0f33", badgeColor: "#e879f9" },
+};
 
-function ContractSend({ lead, data, update }) {
-  const st = lead.pstate || "";
-  const contracts = (data.settings && data.settings.contracts) || {};
-  const url = contracts[st] || "";
-  const setUrl = (v) => update({ ...data, settings: { ...(data.settings || {}), contracts: { ...contracts, [st]: v } } });
-  const subject = `Cash Purchase Agreement — your ${lead.acres ? lead.acres + "-acre " : ""}lot${lead.apn ? " (APN " + lead.apn + ")" : ""}`;
-  const bodyTxt = `Hi ${(lead.owner || "").split(" ")[0] || "there"}, as promised here's the cash purchase agreement for your lot${lead.address ? " at " + lead.address : ""}. I cover all closing costs and we close through a licensed title company.${url ? "\n\nAgreement: " + url : ""}\n\nReply or text me with any questions.`;
-  const mailto = `mailto:${lead.email || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyTxt)}`;
-  const sms = `sms:${(lead.phone || "").replace(/[^0-9+]/g, "")}?&body=${encodeURIComponent(bodyTxt)}`;
-  return (
-    <div style={{ background: "#161d2e", border: "1px solid #1e2a3a", borderRadius: 10, padding: 16, marginBottom: 14 }}>
-      <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 10 }}>✍ Send the {st || "state"} purchase agreement</div>
-      <input value={url} onChange={e => setUrl(e.target.value)} placeholder={`Paste your ${st || "state"} contract link (Drive / DocuSign / PDF URL)`}
-        style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #1e2a3a", background: "#0c0e14", color: "#e2e8f0", fontSize: 13, outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <a href={mailto} style={{ padding: "10px 16px", borderRadius: 8, background: "#f59e0b", color: "#000", fontWeight: 700, fontSize: 13, textDecoration: "none" }}>✉ Email contract</a>
-        <a href={sms} style={{ padding: "10px 16px", borderRadius: 8, background: "transparent", color: "#e2e8f0", border: "1px solid #1e2a3a", fontWeight: 700, fontSize: 13, textDecoration: "none" }}>✆ Text contract</a>
-        {url && <a href={url} target="_blank" rel="noreferrer" style={{ alignSelf: "center", color: "#3b82f6", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>↗ Preview</a>}
-      </div>
-      <div style={{ fontSize: 11, color: "#475569", marginTop: 10, lineHeight: 1.5 }}>Paste your firm's state agreement once — saved for every {st || "state"} deal. Opens your email/messages pre-filled to the seller.</div>
-    </div>
-  );
-}
+/* ============================================================
+   TAB — CALL SCRIPTS (original interactive call console)
+   Dark "call mode" theme preserved from your original system.
+   [YOUR NAME]/[PHONE]/[EMAIL] auto-fill from your saved info.
+   ============================================================ */
+function CallScriptsTab({ settings }) {
+  const [activeScript, setActiveScript] = useState("builder");
+  const [activeStep, setActiveStep] = useState(0);
+  const [checked, setChecked] = useState({});
 
-function BuyerMatch({ lead, data }) {
-  const boxes = data.buyboxes || [];
-  const pkg = `LAND PACKAGE\nParcel: ${lead.apn || "—"} · ${lead.county || ""} County, ${lead.pstate || ""}\nSize: ${lead.acres || "?"} ac\nAddress: ${lead.address || "—"}\nMy price to you: $______\nClose: cash, ~30 days, clean title.`;
+  const script = CALL_SCRIPTS[activeScript];
+  const step = script.steps[activeStep];
+  const fill = (t) => fillTokens(t, settings);
+  const toggle = (key) => setChecked((p) => ({ ...p, [key]: !p[key] }));
+  const switchScript = (id) => { setActiveScript(id); setActiveStep(0); setChecked({}); };
+
   return (
-    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 14, marginBottom: 12 }}>
-      <div className="lc-label">Match to a builder / end buyer</div>
-      {!boxes.length && <div style={{ fontSize: 12.5, color: C.faint }}>No buy boxes yet — add builders in the Buy Boxes tab to match against.</div>}
-      <div style={{ display: "grid", gap: 6 }}>
-        {boxes.map(b => (
-          <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px" }}>
-            <span style={{ fontSize: 13 }}><strong>{b.builder || "Unnamed"}</strong> <span style={{ color: C.faint }}>{splitList(b.counties).join(", ")}</span></span>
-            <a href={`sms:?&body=${encodeURIComponent(pkg)}`} style={{ fontSize: 12, fontWeight: 700, color: C.blue, textDecoration: "none" }}>Send package →</a>
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: "#0c0e14", borderRadius: 10, overflow: "hidden", color: "#e2e8f0", border: `1px solid ${C.line}` }}>
+      {/* Script toggle */}
+      <div style={{ background: "#10131c", borderBottom: "1px solid #1a2030", padding: "16px 18px 0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, letterSpacing: 3, color: "#475569", textTransform: "uppercase" }}>Land Acquisition Call Scripts — live call mode</div>
+          <div style={{ fontSize: 11, color: settings.myName ? "#22c55e" : "#f59e0b" }}>
+            {settings.myName ? `Auto-filling as ${settings.myName}` : "Tip: save your name/phone in any Pipeline lead's Texts & Mailers panel to auto-fill [YOUR NAME]"}
           </div>
-        ))}
-      </div>
-      <button onClick={() => copyText(pkg)} style={{ marginTop: 8, padding: "7px 12px", borderRadius: 6, border: `1px solid ${C.line}`, background: "#fff", color: C.ink, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Copy buyer package</button>
-    </div>
-  );
-}
-
-// Renders ONE call script exactly as the attached file — steps, say/tip blocks, questions,
-// rebuttals, and the "before you hang up" capture list. Step + checkboxes persist on the lead.
-// Auto-fill the script's [PLACEHOLDERS] with live lead data + the caller's name (Deivan by default).
-function fillScript(text, lead, settings, side) {
-  if (!text || typeof text !== "string") return text;
-  const me = (settings && settings.myName) || "Deivan";
-  const phone = (settings && settings.myPhone) || "[PHONE]";
-  const owner = side === "builder" ? (lead.buybox || "[OWNER NAME]") : (lead.owner || "[OWNER NAME]");
-  const nm = side === "builder" ? (lead.buybox || "[NAME]") : (lead.owner || "[NAME]");
-  const area = lead.address || (lead.county ? `${lead.county} County` : null);
-  const county = lead.county ? `${lead.county} County` : null;
-  let t = text.replace(/\[YOUR NAME\]/g, me).replace(/\[PHONE\]/g, phone).replace(/\[OWNER NAME\]/g, owner).replace(/\[NAME\]/g, nm);
-  if (area) t = t.replace(/\[ROAD \/ PARCEL AREA\]/g, area).replace(/\[ROAD \/ GENERAL AREA\]/g, area).replace(/\[ROAD \/ AREA\]/g, area);
-  if (county) t = t.replace(/\[GENERAL AREA\]/g, county).replace(/\[AREA\/MARKET\]/g, county).replace(/\[MARKET\]/g, county);
-  return t;
-}
-
-function ScriptRunner({ script, step, onStep, checks, onToggle, fill }) {
-  const F = fill || ((x) => x);
-  const i = Math.max(0, Math.min(script.steps.length - 1, step));
-  const s = script.steps[i];
-  return (
-    <div>
-      <div style={{ background: "#161d2e", padding: "14px 16px", borderRadius: 10, border: "1px solid #1a2030", marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ background: script.badgeColor + "22", color: script.badgeColor, fontSize: 9, fontWeight: 800, letterSpacing: 1.5, padding: "2px 6px", borderRadius: 3 }}>{script.badge}</span>
-          <span style={{ fontSize: 16, fontWeight: 700, color: "#f1f5f9" }}>{script.title}</span>
         </div>
-        <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 5 }}>🎯 Goal: {script.goal}</div>
-      </div>
-      <div style={{ display: "flex", overflowX: "auto", gap: 6, paddingBottom: 4, marginBottom: 18 }}>
-        {script.steps.map((st, idx) => (
-          <button key={st.id} onClick={() => onStep(idx)} style={{ padding: "7px 15px", borderRadius: 20, border: `1px solid ${i === idx ? script.accent : "#1e2a3a"}`, cursor: "pointer", whiteSpace: "nowrap", fontSize: 12, fontWeight: 600, background: i === idx ? script.accent + "22" : "transparent", color: i === idx ? script.accent : "#64748b" }}>{st.icon} {st.label}</button>
-        ))}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <span style={{ fontSize: 24 }}>{s.icon}</span>
-        <div style={{ fontSize: 17, fontWeight: 700, color: "#f1f5f9" }}>{s.label}</div>
-      </div>
-      <div style={{ background: "#161d2e", borderLeft: `3px solid ${script.accent}`, borderRadius: "0 8px 8px 0", padding: "12px 16px", fontSize: 13, color: "#94a3b8", marginBottom: 24, lineHeight: 1.65 }}>{F(s.intro)}</div>
-      {s.blocks && s.blocks.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          {s.blocks.map((b, bi) => (
-            <div key={bi} style={{ background: b.bg, border: `1px solid ${b.color}33`, borderRadius: 10, padding: "14px 18px", marginBottom: 12, lineHeight: 1.75 }}>
-              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: b.color, marginBottom: 8, textTransform: "uppercase" }}>{b.type === "say" ? "🎙" : b.type === "tip" ? "💡" : "🔵"} {b.label}</div>
-              <div style={{ fontSize: 14, color: "#e2e8f0" }}>{F(b.text)}</div>
-            </div>
+        <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
+          {Object.values(CALL_SCRIPTS).map((s) => (
+            <button key={s.id} type="button" onClick={() => switchScript(s.id)}
+              style={{
+                padding: "10px 16px", border: "none", borderRadius: "8px 8px 0 0", cursor: "pointer",
+                fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap",
+                background: activeScript === s.id ? "#161d2e" : "transparent",
+                color: activeScript === s.id ? s.accent : "#475569",
+                borderBottom: activeScript === s.id ? `2px solid ${s.accent}` : "2px solid transparent",
+              }}>
+              <span style={{ background: (s.badgeColor || s.accent) + "22", color: s.badgeColor || s.accent, fontSize: 9, fontWeight: 800, letterSpacing: 1.5, padding: "2px 6px", borderRadius: 3, marginRight: 8 }}>{s.badge}</span>
+              {s.label}: {s.title}
+            </button>
           ))}
         </div>
-      )}
-      {s.questions && s.questions.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 14 }}>Questions to Cover</div>
-          {s.questions.map((item, qi) => {
-            const key = `${script.id}-${s.id}-q${qi}`, done = checks[key];
-            return (
-              <div key={qi} onClick={() => onToggle(key)} style={{ display: "flex", gap: 12, alignItems: "flex-start", background: done ? "#0f2a1a" : "#13181f", border: `1px solid ${done ? "#22c55e44" : "#1e2a3a"}`, borderRadius: 10, padding: "13px 16px", marginBottom: 9, cursor: "pointer" }}>
-                <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${done ? "#22c55e" : "#334155"}`, background: done ? "#22c55e" : "transparent", flexShrink: 0, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#000" }}>{done ? "✓" : ""}</div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: done ? "#6ee7b7" : "#e2e8f0", marginBottom: 4 }}>"{item.q}"</div>
-                  <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}><span style={{ color: script.accent }}>Why: </span>{item.why}</div>
+      </div>
+
+      {/* Script header */}
+      <div style={{ background: "#161d2e", padding: "16px 18px 14px", borderBottom: "1px solid #1a2030" }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: "#f1f5f9" }}>{script.title}</div>
+        <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>🎯 Goal: {script.goal}</div>
+      </div>
+
+      {/* Step nav */}
+      <div style={{ display: "flex", overflowX: "auto", gap: 6, padding: "12px 18px", background: "#10131c", borderBottom: "1px solid #1a2030" }}>
+        {script.steps.map((s, i) => (
+          <button key={s.id} type="button" onClick={() => setActiveStep(i)}
+            style={{
+              padding: "7px 15px", borderRadius: 20, cursor: "pointer", whiteSpace: "nowrap",
+              fontSize: 12, fontWeight: 600,
+              border: `1px solid ${activeStep === i ? script.accent : "#1e2a3a"}`,
+              background: activeStep === i ? script.accent + "22" : "transparent",
+              color: activeStep === i ? script.accent : "#64748b",
+            }}>
+            {s.icon} {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Step content */}
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "24px 18px 50px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <span style={{ fontSize: 24 }}>{step.icon}</span>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#f1f5f9" }}>{step.label}</div>
+        </div>
+
+        <div style={{ background: "#161d2e", borderLeft: `3px solid ${script.accent}`, borderRadius: "0 8px 8px 0", padding: "12px 16px", fontSize: 13, color: "#94a3b8", marginBottom: 22, lineHeight: 1.65 }}>
+          {step.intro}
+        </div>
+
+        {step.blocks && step.blocks.length > 0 && (
+          <div style={{ marginBottom: 26 }}>
+            {step.blocks.map((b, i) => (
+              <div key={i} style={{ background: b.bg, border: `1px solid ${b.color}33`, borderRadius: 10, padding: "14px 18px", marginBottom: 12, lineHeight: 1.75 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: b.color, marginBottom: 8, textTransform: "uppercase" }}>
+                  {b.type === "say" ? "🎙" : b.type === "tip" ? "💡" : "🔵"} {b.label}
                 </div>
+                <div style={{ fontSize: 14, color: "#e2e8f0", whiteSpace: "pre-wrap" }}>{fill(b.text)}</div>
               </div>
-            );
-          })}
-          <div style={{ fontSize: 11, color: "#1e2a3a", marginTop: 6 }}>Tap a question to mark it covered.</div>
-        </div>
-      )}
-      {s.rebuttals && s.rebuttals.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 14 }}>Rebuttals</div>
-          {s.rebuttals.map((r, ri) => (
-            <div key={ri} style={{ background: "#13101a", border: "1px solid #2d1f3a", borderRadius: 10, padding: "14px 18px", marginBottom: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", marginBottom: 8 }}>THEM: {F(r.them)}</div>
-              <div style={{ fontSize: 14, color: "#fde68a", lineHeight: 1.7 }}><span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 11 }}>YOU: </span>{F(r.you)}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      {s.comeback && s.comeback.length > 0 && (
-        <div style={{ background: "#1a1500", border: `1px solid ${script.accent}44`, borderLeft: `3px solid ${script.accent}`, borderRadius: "0 10px 10px 0", padding: "16px 20px" }}>
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: script.accent, marginBottom: 12, textTransform: "uppercase" }}>📋 Before You Hang Up — Capture This</div>
-          {s.comeback.map((item, ci) => {
-            const key = `${script.id}-${s.id}-c${ci}`, done = checks[key];
-            return (
-              <div key={ci} onClick={() => onToggle(key)} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "pointer" }}>
-                <div style={{ width: 16, height: 16, borderRadius: 3, border: `2px solid ${done ? script.accent : "#334155"}`, background: done ? script.accent : "transparent", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "#000" }}>{done ? "✓" : ""}</div>
-                <div style={{ fontSize: 13, color: done ? "#94a3b8" : "#cbd5e1", textDecoration: done ? "line-through" : "none" }}>{item}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 32 }}>
-        <button onClick={() => onStep(Math.max(0, i - 1))} disabled={i === 0} style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #1e2a3a", background: "transparent", color: i === 0 ? "#1e2a3a" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: i === 0 ? "default" : "pointer" }}>← Previous</button>
-        <button onClick={() => onStep(Math.min(script.steps.length - 1, i + 1))} disabled={i === script.steps.length - 1} style={{ padding: "10px 20px", borderRadius: 8, border: "none", background: i === script.steps.length - 1 ? "#1e2a3a" : script.accent, color: i === script.steps.length - 1 ? "#334155" : "#000", fontSize: 13, fontWeight: 700, cursor: i === script.steps.length - 1 ? "default" : "pointer" }}>Next Step →</button>
-      </div>
-    </div>
-  );
-}
-
-function PhaseChecklist({ phase, checks, toggle }) {
-  if (!phase.checklist) return null;
-  return (
-    <div style={{ background: "#161d2e", border: "1px solid #1e2a3a", borderRadius: 10, padding: 16, marginBottom: 14 }}>
-      <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 12 }}>Checklist</div>
-      <div style={{ display: "grid", gap: 8 }}>
-        {phase.checklist.map((item, j) => {
-          const k = `${phase.key}.${j}`, done = checks[k];
-          return (
-            <div key={k} onClick={() => toggle(k)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-              <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${done ? "#22c55e" : "#334155"}`, background: done ? "#22c55e" : "transparent", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: "#000" }}>{done ? "✓" : ""}</div>
-              <div style={{ fontSize: 13.5, color: done ? "#94a3b8" : "#cbd5e1", textDecoration: done ? "line-through" : "none" }}>{item}</div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function FunnelScriptDark({ title, body }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div style={{ background: "#0f2a1a", border: "1px solid #22c55e33", borderRadius: 10, padding: "14px 18px", marginBottom: 14, lineHeight: 1.75 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 2, color: "#22c55e", textTransform: "uppercase" }}>🎙 {title}</span>
-        <button onClick={async () => { await copyText(body); setCopied(true); setTimeout(() => setCopied(false), 1600); }}
-          style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid #1e2a3a", background: copied ? "#22c55e" : "transparent", color: copied ? "#000" : "#94a3b8", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy"}</button>
-      </div>
-      <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 14, color: "#e2e8f0", fontFamily: "'Inter',system-ui,sans-serif" }}>{body}</pre>
-    </div>
-  );
-}
-
-const DEAL_PHASES = [
-  { key: "seller", label: "📞 Seller Call", script: "seller" },
-  { key: "comps", label: "📊 Comps", tool: "comps" },
-  { key: "agreement", label: "✍ Agreement", tool: "contract", checklist: ["Agreed on price", "Purchase agreement sent", "Purchase agreement SIGNED", "Earnest-money terms set", "Title company chosen", "Owner mailing address confirmed"] },
-  { key: "buyer", label: "🤝 Buyer Call", script: "builder" },
-  { key: "close", label: "🏁 Title & Close", tool: "close", checklist: ["Title ordered", "Title commitment reviewed / clear", "Escrow opened", "Closing date scheduled", "Assignment fee collected", "Deed recorded — mark Closed"] },
-];
-
-function DealFlow({ lead, data, update, onClose }) {
-  const settings = data.settings || {};
-  const box = data.buyboxes.find(b => b.builder === lead.buybox) || data.buyboxes[0] || {};
-  const phaseIdx = Math.max(0, Math.min(DEAL_PHASES.length - 1, lead.phase || 0));
-  const P = DEAL_PHASES[phaseIdx];
-  const checks = lead.checks || {};
-  const steps = lead.scriptSteps || {};
-  const saveLead = (patch) => update({ ...data, leads: data.leads.map(l => l.id === lead.id ? { ...l, ...patch } : l) });
-  const goPhase = (i) => saveLead({ phase: Math.max(0, Math.min(DEAL_PHASES.length - 1, i)) });
-  const toggle = (k) => saveLead({ checks: { ...checks, [k]: !checks[k] } });
-  const setStep = (id, i) => saveLead({ scriptSteps: { ...steps, [id]: i } });
-
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 3000, background: "#0c0e14", display: "flex", flexDirection: "column", fontFamily: "'Inter',system-ui,sans-serif", color: "#e2e8f0" }}>
-      <style>{FONTS}</style>
-      <div style={{ background: "#10131c", borderBottom: "1px solid #1a2030", padding: "11px 16px", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-        <button onClick={onClose} style={{ padding: "7px 13px", borderRadius: 8, border: "1px solid #1e2a3a", background: "transparent", color: "#94a3b8", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>← Map</button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 16, color: "#f1f5f9", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.owner || "New Lead"}</div>
-          <div className="lc-mono" style={{ fontSize: 11, color: "#475569", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.address || (lead.acres ? lead.acres + " ac" : "")}{lead.county ? ` · ${lead.county} Co, ${lead.pstate || ""}` : ""} · auto-saved ✓</div>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 5, padding: "9px 12px", overflowX: "auto", background: "#10131c", borderBottom: "1px solid #1a2030", flexShrink: 0 }}>
-        {DEAL_PHASES.map((p, i) => (
-          <button key={p.key} onClick={() => goPhase(i)} style={{ flexShrink: 0, padding: "7px 14px", borderRadius: 20, border: `1px solid ${i === phaseIdx ? "#f59e0b" : "#1e2a3a"}`, background: i === phaseIdx ? "#f59e0b22" : "transparent", color: i === phaseIdx ? "#f59e0b" : "#64748b", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>{p.label}</button>
-        ))}
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px 56px" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto" }}>
-          {P.script && <ScriptRunner script={SCRIPTS[P.script]} step={steps[P.script] || 0} onStep={(i) => setStep(P.script, i)} checks={checks} onToggle={toggle} fill={(t) => fillScript(t, lead, settings, P.script)} />}
-          {P.tool === "comps" && <FunnelComps lead={lead} />}
-          {P.tool === "contract" && (<><ContractSend lead={lead} data={data} update={update} /><PhaseChecklist phase={P} checks={checks} toggle={toggle} /></>)}
-          {P.tool === "close" && (<><FunnelScriptDark {...titleScript(lead, settings, box)} /><PhaseChecklist phase={P} checks={checks} toggle={toggle} /></>)}
-          <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
-            <button onClick={() => goPhase(phaseIdx - 1)} disabled={phaseIdx === 0} style={{ padding: "11px 18px", borderRadius: 8, border: "1px solid #1e2a3a", background: "transparent", color: phaseIdx === 0 ? "#1e2a3a" : "#94a3b8", fontWeight: 700, fontSize: 13.5, cursor: phaseIdx === 0 ? "default" : "pointer" }}>← Back</button>
-            <button onClick={() => phaseIdx === DEAL_PHASES.length - 1 ? onClose() : goPhase(phaseIdx + 1)} style={{ flex: 1, padding: "11px 18px", borderRadius: 8, border: "none", background: "#f59e0b", color: "#000", fontWeight: 800, fontSize: 13.5, cursor: "pointer" }}>{phaseIdx === DEAL_PHASES.length - 1 ? "Finish — back to Map" : `Next: ${DEAL_PHASES[phaseIdx + 1].label} →`}</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function useIsMobile() {
-  const [m, setM] = useState(typeof window !== "undefined" && window.innerWidth < 640);
-  useEffect(() => {
-    const f = () => setM(window.innerWidth < 640);
-    window.addEventListener("resize", f);
-    return () => window.removeEventListener("resize", f);
-  }, []);
-  return m;
-}
-
-export default function LandCommand() {
-  const [tab, setTab] = useState("gis");
-  const [data, setData] = useState({ buyboxes: [], leads: [] });
-  const [loaded, setLoaded] = useState(false);
-  const [activeDeal, setActiveDeal] = useState(null);
-
-  useEffect(() => {
-    let live = true;
-    loadData().then(d => { if (live) { setData(d); setLoaded(true); } });
-    return () => { live = false; };
-  }, []);
-
-  const update = (next) => { setData(next); saveData(next); };
-  const startDealFromParcel = (parcel) => {
-    const base = { ...parcelToLead(parcel), stage: 0, checks: {} };
-    if (!data.leads.some(l => l.id === base.id)) update({ ...data, leads: [base, ...data.leads] });
-    setActiveDeal(base.id);
-  };
-  const activeLead = activeDeal && data.leads.find(l => l.id === activeDeal);
-  const isMobile = useIsMobile();
-
-  return (
-    <div className="lc-body" style={{ minHeight: "100vh", background: C.paper, color: C.ink }}>
-      <style>{FONTS}</style>
-      {/* Header */}
-      <div style={{ background: C.ink, padding: isMobile ? "9px 12px 0" : "16px 20px 0" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-            <span className="lc-display" style={{ fontSize: isMobile ? 20 : 30, fontWeight: 800, color: "#fff", letterSpacing: ".06em", textTransform: "uppercase" }}>
-              Land<span style={{ color: C.orange }}>Command</span>
-            </span>
-            {!isMobile && <span className="lc-mono" style={{ fontSize: 11.5, color: "#9DAB9F" }}>buy box → sourcing → score → outreach</span>}
-            <span className="lc-mono" style={{ marginLeft: "auto", fontSize: 11, color: "#9DAB9F", whiteSpace: "nowrap" }}>
-              {data.buyboxes.length} {isMobile ? "bb" : "buy box" + (data.buyboxes.length === 1 ? "" : "es")} · {data.leads.length} lead{data.leads.length === 1 ? "" : "s"}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: isMobile ? 3 : 6, marginTop: isMobile ? 8 : 14, flexWrap: isMobile ? "nowrap" : "wrap", overflowX: isMobile ? "auto" : "visible", WebkitOverflowScrolling: "touch" }}>
-            {TABS.map(([id, label]) => (
-              <button key={id} type="button" onClick={() => setTab(id)} className="lc-flagtab lc-display"
-                style={{
-                  padding: isMobile ? "7px 15px 7px 11px" : "9px 26px 9px 16px", border: "none", cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap",
-                  fontWeight: 800, fontSize: isMobile ? 12 : 14.5, letterSpacing: ".05em", textTransform: "uppercase",
-                  background: tab === id ? C.paper : "#26352C", color: tab === id ? C.ink : "#B9C4BB",
-                  borderRadius: "6px 0 0 0",
-                }}>
-                {label}
-              </button>
             ))}
           </div>
-        </div>
-      </div>
-      {/* Body */}
-      <div style={{ maxWidth: tab === "gis" ? "100%" : 1100, margin: "0 auto", padding: tab === "gis" ? "0" : (isMobile ? "12px 10px 36px" : "22px 20px 60px") }}>
-        {!loaded ? <div style={{ color: C.faint, fontSize: 14 }}>Loading your saved buy boxes and leads…</div> : (
-          <>
-            {tab === "boxes" && <BuyBoxesTab data={data} update={update} />}
-            {tab === "find" && <FindDealsTab data={data} />}
-            {tab === "match" && <MatchTab data={data} update={update} />}
-            {tab === "calc" && <CalcTab data={data} update={update} />}
-            {tab === "pipeline" && <PipelineTab data={data} update={update} onResumeDeal={(lead) => setActiveDeal(lead.id)} />}
-            {tab === "gis" && <GISTab data={data} update={update} onStartDeal={startDealFromParcel} />}
-          </>
         )}
-      </div>
-      {activeLead && <DealFlow lead={activeLead} data={data} update={update} onClose={() => setActiveDeal(null)} />}
-    </div>
-  );
-}
 
-/* ============================================================
-   Scripts engine — personalized outreach per lead
-   ============================================================ */
-async function copyText(t) {
-  try { await navigator.clipboard.writeText(t); return true; }
-  catch (e) {
-    const ta = document.createElement("textarea");
-    ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    try { document.execCommand("copy"); } catch (e2) {}
-    document.body.removeChild(ta); return true;
-  }
-}
-
-function buildScripts(lead, settings, box) {
-  const first = (lead.owner || "").trim().split(/\s+/)[0] || "there";
-  const me = settings.myName || "[your name]";
-  const myPhone = settings.myPhone || "[your phone]";
-  const co = settings.myCompany || "a local land buying company";
-  const acres = lead.acres ? `${lead.acres}-acre ` : "";
-  const where = lead.address || (lead.county ? `in ${lead.county} County` : "in the area");
-  const apn = lead.apn ? ` (parcel ${lead.apn})` : "";
-  const offerT = parseFloat(lead.offer || lead.price);
-  const hasOffer = !isNaN(offerT) && offerT > 0;
-  const anchor = hasOffer ? Math.round(offerT * 0.85 / 500) * 500 : null;
-  const fmt = (n) => "$" + Number(n).toLocaleString();
-  const closeDays = box?.closeDays || "30";
-
-  return [
-    {
-      title: "Text #1 — Opener (Day 1)",
-      body: `Hi ${first}, this is ${me}. Are you the owner of the ${acres}vacant lot ${where}${apn}? I'm a local cash buyer interested in purchasing it. No agents, no fees. Is it something you'd consider selling?`,
-    },
-    {
-      title: "Text #2 — Follow-up (Day 4–5)",
-      body: `Hi ${first}, ${me} again — just floating my message back up. I buy land for cash and can close in about ${closeDays} days, and I cover all the closing costs. Even a "no thanks" helps me close the file. Any interest in the ${acres}lot ${where}?`,
-    },
-    {
-      title: "Cold call script (Day 2)",
-      body: `OPENER:\n"Hi, is this ${first}? ... Hey ${first}, my name's ${me} — I know this is out of the blue, so I'll be quick. I buy vacant land here in ${lead.county || "the"} County for cash, and your ${acres}lot ${where} came up in county records. Have you ever thought about selling it?"\n\nIF MAYBE — QUALIFY:\n1. "How long have you owned it?" (let them talk — listen for taxes, distance, inheritance)\n2. "Are you using it for anything right now?"\n3. "Is there anything about the lot I should know — access, wetness, liens?"\n4. "If we agreed on a fair cash number, is there anything stopping you from selling?"\n\nPRICE — NEVER THROW THE FIRST NUMBER IF AVOIDABLE:\n"What number would make this a no-brainer for you?"\n${hasOffer ? `If pushed, anchor low: "Based on recent lot sales I'm around ${fmt(anchor)} — but walk me through the property, there may be room."` : `If pushed: "Let me verify access and utilities and I'll text you a real number within 24 hours — fair?"`}\n\nOBJECTIONS:\n• "It's worth more than that" → "You might be right — what are you basing that on? I'm using actual sold lots nearby, happy to send them to you."\n• "Let me think about it" → "Of course. What part do you want to think over — the price, or selling at all?"\n• "Send me something in writing" → "Will do. Best email or mailing address?" (CONFIRM MAILING ADDRESS — gold.)\n\nCLOSE:\n"Here's my promise: cash, I pay every closing cost, no commissions, and we close in ~${closeDays} days through a licensed title company. I'll send the agreement today."`,
-    },
-    {
-      title: "Voicemail (leave once, max)",
-      body: `Hi ${first}, this is ${me} at ${myPhone}. I'm a local cash buyer reaching out about your ${acres}vacant lot ${where}. I'd like to make you a no-obligation cash offer — I cover all costs and there are no agent fees. Again, ${me}, ${myPhone}. Thanks!`,
-    },
-    {
-      title: "Mailer #1 — Postcard (Day 5)",
-      body: `${first ? first.toUpperCase() : "PROPERTY OWNER"} — I WANT TO BUY YOUR LAND${apn ? ` ${apn.trim()}` : ""}\n\nI'm a local buyer paying CASH for vacant land ${lead.county ? `in ${lead.county} County` : "in your area"}.\n\n✓ No realtor commissions\n✓ I pay ALL closing costs\n✓ Close in ~${closeDays} days — or on your timeline\n✓ Sell as-is: back taxes, liens, overgrowth — I handle it\n\nCall or text me directly: ${myPhone}\n${me}${settings.myCompany ? ` · ${settings.myCompany}` : ""}\n\n(If you're not interested, toss this card — no hard feelings. But if that lot is just costing you taxes every year, let's talk.)`,
-    },
-    {
-      title: `Mailer #2 — Offer letter (Day 21)${hasOffer ? "" : " — set 'Your offer' on the lead to auto-fill numbers"}`,
-      body: `Dear ${lead.owner || "Property Owner"},\n\nMy name is ${me} with ${co}. I'm writing about your ${acres}vacant land ${where}${apn}.\n\nI'd like to buy your property for cash. ${hasOffer ? `Based on recent sales of similar lots in the area, I'm prepared to offer in the range of ${fmt(anchor)} to ${fmt(offerT)}, depending on a quick review of access and utilities.` : `After a quick review of access and utilities, I can present you a firm cash number within 48 hours of hearing from you.`}\n\nWhat that means for you:\n• CASH — no financing contingencies, no waiting on a bank\n• I pay 100% of closing costs and there are zero commissions\n• We close through a licensed local title company in about ${closeDays} days\n• Completely as-is — overgrown, landlocked questions, back taxes, liens — I deal with all of it\n\nIf the timing isn't right, no problem — keep this letter. But if that land has become a line item you pay taxes on and never visit, call or text me at ${myPhone} and let's turn it into cash.\n\nRespectfully,\n${me}\n${settings.myCompany || ""}\n${myPhone}`,
-    },
-  ];
-}
-
-function ScriptsPanel({ lead, data, update }) {
-  const settings = data.settings || { myName: "", myPhone: "", myCompany: "" };
-  const [copied, setCopied] = useState(-1);
-  const box = data.buyboxes.find(b => b.builder === lead.buybox);
-  const scripts = buildScripts(lead, settings, box);
-  const setS = (k) => (e) => update({ ...data, settings: { ...settings, [k]: e.target.value } });
-  return (
-    <div style={{ marginTop: 12, borderTop: `2px solid ${C.line}`, paddingTop: 12 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 12, background: C.amberPale, border: `1px solid ${C.amber}`, borderRadius: 6, padding: 10 }}>
-        <Field label="Your name (saved for all scripts)"><input className="lc-input" value={settings.myName} onChange={setS("myName")} placeholder="Mike" /></Field>
-        <Field label="Your phone"><input className="lc-input" value={settings.myPhone} onChange={setS("myPhone")} placeholder="(727) 555-0100" /></Field>
-        <Field label="Company (optional)"><input className="lc-input" value={settings.myCompany} onChange={setS("myCompany")} placeholder="Gulf Coast Land Buyers" /></Field>
-      </div>
-      <div style={{ display: "grid", gap: 10 }}>
-        {scripts.map((s, i) => (
-          <div key={i} style={{ background: "#FAFBF7", border: `1px solid ${C.line}`, borderRadius: 6, padding: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <span className="lc-display" style={{ fontWeight: 800, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".05em" }}>{s.title}</span>
-              <Btn small kind={copied === i ? "primary" : "ghost"} onClick={async () => { await copyText(s.body); setCopied(i); setTimeout(() => setCopied(-1), 1800); }}>
-                {copied === i ? "Copied ✓" : "Copy"}
-              </Btn>
-            </div>
-            <pre className="lc-body" style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 13, lineHeight: 1.55, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif" }}>{s.body}</pre>
-          </div>
-        ))}
-      </div>
-      <div style={{ fontSize: 11.5, color: C.faint, marginTop: 8 }}>
-        Heads-up: scrub phone lists against the Do Not Call registry and follow TCPA/state texting rules before mass outreach.
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-   TAB — Deal Calc (comps → market value → max allowable offer)
-   ============================================================ */
-function CalcTab({ data, update }) {
-  const [boxId, setBoxId] = useState("");
-  const [acres, setAcres] = useState("");
-  const [comps, setComps] = useState([{ price: "", acres: "" }, { price: "", acres: "" }, { price: "", acres: "" }, { price: "", acres: "" }, { price: "", acres: "" }]);
-  const [mvOverride, setMvOverride] = useState("");
-  const [discount, setDiscount] = useState("60");      // offer as % of market value
-  const [clearing, setClearing] = useState("");
-  const [survey, setSurvey] = useState("1500");
-  const [closing, setClosing] = useState("1500");
-  const [misc, setMisc] = useState("0");
-  const [fee, setFee] = useState("10000");
-  const [savedMsg, setSavedMsg] = useState("");
-  const box = data.buyboxes.find(b => b.id === boxId);
-
-  const setComp = (i, k, v) => setComps(comps.map((c, j) => j === i ? { ...c, [k]: v } : c));
-  const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
-
-  const validComps = comps.filter(c => n(c.price) > 0 && n(c.acres) > 0);
-  const avgPPA = validComps.length ? validComps.reduce((s, c) => s + n(c.price) / n(c.acres), 0) / validComps.length : 0;
-  const compMV = avgPPA * n(acres);
-  const marketValue = n(mvOverride) > 0 ? n(mvOverride) : compMV;
-  const builderMax = box && n(box.maxPrice) > 0 ? n(box.maxPrice) : Infinity;
-  // What you can realistically sell it for: lesser of market value and the builder's ceiling
-  const exitPrice = Math.min(marketValue || Infinity, builderMax);
-  const costs = n(clearing) + n(survey) + n(closing) + n(misc);
-  const rawMAO = (isFinite(exitPrice) ? exitPrice : 0) * (n(discount) / 100) - costs - n(fee) > 0
-    ? (isFinite(exitPrice) ? exitPrice : 0) * (n(discount) / 100) - costs - n(fee)
-    : 0;
-  const mao = Math.floor(rawMAO / 100) * 100;
-  const anchorOffer = Math.floor(mao * 0.85 / 100) * 100;
-  const profitAtMAO = (isFinite(exitPrice) ? exitPrice : 0) - mao - costs;
-  const ready = (marketValue > 0 || builderMax !== Infinity) && n(acres) >= 0;
-  const fmt = (v) => isFinite(v) ? "$" + Math.round(v).toLocaleString() : "—";
-
-  const sendToPipeline = () => {
-    const lead = { ...emptyLead(), acres, price: isFinite(exitPrice) ? String(Math.round(exitPrice)) : "", offer: String(mao), buybox: box?.builder || "", source: "Deal Calc", notes: `MAO ${fmt(mao)} · anchor ${fmt(anchorOffer)} · exit ${fmt(exitPrice)} · costs ${fmt(costs)} · fee target ${fmt(n(fee))}` };
-    update({ ...data, leads: [lead, ...data.leads] });
-    setSavedMsg("Saved to Pipeline ✓ — open the lead and add the owner/APN");
-    setTimeout(() => setSavedMsg(""), 5000);
-  };
-
-  return (
-    <div>
-      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Deal calculator</div>
-      <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Comp the lot, set your costs and assignment fee, and it spits out your max allowable offer and your opening anchor.</div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18 }}>
-          <SectionHead>Step 1 — The lot & the buyer</SectionHead>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-            <Field label="Subject lot size (acres)"><input className="lc-input" type="number" value={acres} onChange={e => setAcres(e.target.value)} placeholder="0.25" /></Field>
-            <Field label="Builder buy box (sets price ceiling)">
-              <select className="lc-input" value={boxId} onChange={e => setBoxId(e.target.value)}>
-                <option value="">— none / open market —</option>
-                {data.buyboxes.map(b => <option key={b.id} value={b.id}>{b.builder || "Unnamed"}{b.maxPrice ? ` (max $${Number(b.maxPrice).toLocaleString()})` : ""}</option>)}
-              </select>
-            </Field>
-          </div>
-
-          <SectionHead>Step 2 — Comps (sold vacant lots, same zip, last 12 mo)</SectionHead>
-          <div style={{ display: "grid", gap: 8 }}>
-            {comps.map((c, i) => {
-              const ppa = n(c.price) > 0 && n(c.acres) > 0 ? n(c.price) / n(c.acres) : 0;
+        {step.questions && step.questions.length > 0 && (
+          <div style={{ marginBottom: 26 }}>
+            <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 12 }}>Questions to Cover</div>
+            {step.questions.map((item, i) => {
+              const key = `${activeScript}-${step.id}-q${i}`;
+              const done = checked[key];
               return (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px", gap: 8, alignItems: "center" }}>
-                  <input className="lc-input" type="number" placeholder={`Comp ${i + 1} sold price ($)`} value={c.price} onChange={e => setComp(i, "price", e.target.value)} />
-                  <input className="lc-input" type="number" placeholder="Acres" value={c.acres} onChange={e => setComp(i, "acres", e.target.value)} />
-                  <span className="lc-mono" style={{ fontSize: 12, color: ppa ? C.green : C.faint, fontWeight: 600 }}>{ppa ? `$${Math.round(ppa).toLocaleString()}/ac` : "—"}</span>
+                <div key={i} onClick={() => toggle(key)}
+                  style={{
+                    display: "flex", gap: 12, alignItems: "flex-start",
+                    background: done ? "#0f2a1a" : "#13181f",
+                    border: `1px solid ${done ? "#22c55e44" : "#1e2a3a"}`,
+                    borderRadius: 10, padding: "13px 16px", marginBottom: 9, cursor: "pointer",
+                  }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 4, flexShrink: 0, marginTop: 2,
+                    border: `2px solid ${done ? "#22c55e" : "#334155"}`,
+                    background: done ? "#22c55e" : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 11, fontWeight: 700, color: "#000",
+                  }}>{done ? "✓" : ""}</div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: done ? "#6ee7b7" : "#e2e8f0", marginBottom: 4 }}>"{fill(item.q)}"</div>
+                    <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.5 }}><span style={{ color: script.accent }}>Why: </span>{item.why}</div>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 11, color: "#334155", marginTop: 6 }}>Tap a question to mark it covered.</div>
+          </div>
+        )}
+
+        {step.rebuttals && step.rebuttals.length > 0 && (
+          <div style={{ marginBottom: 26 }}>
+            <div style={{ fontSize: 11, letterSpacing: 2, color: "#475569", textTransform: "uppercase", marginBottom: 12 }}>Rebuttals</div>
+            {step.rebuttals.map((r, i) => (
+              <div key={i} style={{ background: "#13101a", border: "1px solid #2d1f3a", borderRadius: 10, padding: "14px 18px", marginBottom: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", marginBottom: 8 }}>THEM: {r.them}</div>
+                <div style={{ fontSize: 14, color: "#fde68a", lineHeight: 1.7 }}><span style={{ color: "#f59e0b", fontWeight: 700, fontSize: 11 }}>YOU: </span>{fill(r.you)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {step.comeback && step.comeback.length > 0 && (
+          <div style={{ background: "#1a1500", border: `1px solid ${script.accent}44`, borderLeft: `3px solid ${script.accent}`, borderRadius: "0 10px 10px 0", padding: "16px 20px" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: script.accent, marginBottom: 12, textTransform: "uppercase" }}>📋 Before You Hang Up — Capture This</div>
+            {step.comeback.map((item, i) => {
+              const key = `${activeScript}-${step.id}-c${i}`;
+              const done = checked[key];
+              return (
+                <div key={i} onClick={() => toggle(key)} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, cursor: "pointer" }}>
+                  <div style={{
+                    width: 16, height: 16, borderRadius: 3, flexShrink: 0,
+                    border: `2px solid ${done ? script.accent : "#334155"}`,
+                    background: done ? script.accent : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 9, fontWeight: 800, color: "#000",
+                  }}>{done ? "✓" : ""}</div>
+                  <div style={{ fontSize: 13, color: done ? "#94a3b8" : "#cbd5e1", textDecoration: done ? "line-through" : "none" }}>{item}</div>
                 </div>
               );
             })}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginTop: 12 }}>
-            <Field label="Avg $/acre from comps">
-              <div className="lc-mono lc-input" style={{ background: "#F4F6F0", fontWeight: 600 }}>{avgPPA ? `$${Math.round(avgPPA).toLocaleString()}/ac` : "enter comps"}</div>
-            </Field>
-            <Field label="Comp-based market value">
-              <div className="lc-mono lc-input" style={{ background: "#F4F6F0", fontWeight: 600 }}>{compMV ? fmt(compMV) : "—"}</div>
-            </Field>
-            <Field label="Or override market value ($)"><input className="lc-input" type="number" value={mvOverride} onChange={e => setMvOverride(e.target.value)} placeholder="55000" /></Field>
-          </div>
-
-          <SectionHead>Step 3 — Your numbers</SectionHead>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-            <Field label="Offer as % of exit price"><input className="lc-input" type="number" value={discount} onChange={e => setDiscount(e.target.value)} placeholder="60" /></Field>
-            <Field label="Clearing estimate ($)"><input className="lc-input" type="number" value={clearing} onChange={e => setClearing(e.target.value)} placeholder="0 if cleared" /></Field>
-            <Field label="Survey / perc ($)"><input className="lc-input" type="number" value={survey} onChange={e => setSurvey(e.target.value)} /></Field>
-            <Field label="Closing / title ($)"><input className="lc-input" type="number" value={closing} onChange={e => setClosing(e.target.value)} /></Field>
-            <Field label="Misc / back taxes ($)"><input className="lc-input" type="number" value={misc} onChange={e => setMisc(e.target.value)} /></Field>
-            <Field label="Your assignment fee ($)"><input className="lc-input" type="number" value={fee} onChange={e => setFee(e.target.value)} /></Field>
-          </div>
-          <div style={{ fontSize: 11.5, color: C.faint, marginTop: 8 }}>
-            Rule of thumb: 50–70% of exit price for infill lots with utilities; 30–50% for rural/raw acreage. The hotter the buy box demand, the higher you can go.
-          </div>
-        </div>
-
-        {ready && (
-          <div style={{ background: C.ink, borderRadius: 8, padding: 20, color: "#fff" }}>
-            <div className="lc-display" style={{ fontSize: 16, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: C.orange, marginBottom: 12 }}>Offer ladder</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 14 }}>
-              <div>
-                <div className="lc-label" style={{ color: "#9DAB9F" }}>Opening anchor (85%)</div>
-                <div className="lc-mono" style={{ fontSize: 26, fontWeight: 600 }}>{fmt(anchorOffer)}</div>
-              </div>
-              <div>
-                <div className="lc-label" style={{ color: "#9DAB9F" }}>Max allowable offer</div>
-                <div className="lc-mono" style={{ fontSize: 26, fontWeight: 600, color: C.orange }}>{fmt(mao)}</div>
-                <div style={{ fontSize: 11, color: "#9DAB9F" }}>never go past this</div>
-              </div>
-              <div>
-                <div className="lc-label" style={{ color: "#9DAB9F" }}>Exit price (sell to builder)</div>
-                <div className="lc-mono" style={{ fontSize: 26, fontWeight: 600 }}>{fmt(exitPrice)}</div>
-                <div style={{ fontSize: 11, color: "#9DAB9F" }}>{box && builderMax !== Infinity && builderMax <= (marketValue || Infinity) ? `capped by ${box.builder}'s max` : "market value"}</div>
-              </div>
-              <div>
-                <div className="lc-label" style={{ color: "#9DAB9F" }}>Spread at MAO</div>
-                <div className="lc-mono" style={{ fontSize: 26, fontWeight: 600, color: profitAtMAO >= n(fee) ? "#7FD8A4" : "#E8A6A0" }}>{fmt(profitAtMAO)}</div>
-                <div style={{ fontSize: 11, color: "#9DAB9F" }}>after {fmt(costs)} costs</div>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
-              <Btn onClick={sendToPipeline}>+ Save deal to Pipeline</Btn>
-              <Btn kind="ghost" onClick={async () => { await copyText(`Lot: ${acres} ac\nExit price: ${fmt(exitPrice)}\nOpening offer: ${fmt(anchorOffer)}\nMax offer: ${fmt(mao)}\nCosts: ${fmt(costs)}\nTarget fee: ${fmt(n(fee))}`); setSavedMsg("Breakdown copied ✓"); setTimeout(() => setSavedMsg(""), 2500); }}>Copy breakdown</Btn>
-              {savedMsg && <span style={{ fontSize: 13, fontWeight: 700, color: "#7FD8A4" }}>{savedMsg}</span>}
-            </div>
-          </div>
         )}
+
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 32 }}>
+          <button type="button" onClick={() => setActiveStep((p) => Math.max(0, p - 1))} disabled={activeStep === 0}
+            style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #1e2a3a", background: "transparent", color: activeStep === 0 ? "#1e2a3a" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: activeStep === 0 ? "default" : "pointer" }}>
+            ← Previous
+          </button>
+          <button type="button" onClick={() => setActiveStep((p) => Math.min(script.steps.length - 1, p + 1))} disabled={activeStep === script.steps.length - 1}
+            style={{ padding: "10px 20px", borderRadius: 8, border: "none", background: activeStep === script.steps.length - 1 ? "#1e2a3a" : script.accent, color: activeStep === script.steps.length - 1 ? "#334155" : "#000", fontSize: 13, fontWeight: 700, cursor: activeStep === script.steps.length - 1 ? "default" : "pointer" }}>
+            Next Step →
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 /* ============================================================
-   GIS MAP TAB — Parcel Explorer
-   Satellite + lot lines + ownership + tax delinquency
-   Coverage: FL · TX · TN · NC (all counties)
+   TAB — MARKET SCOUT (AI growth-signal analyzer)
+   Calls Claude with live web search from inside the app.
    ============================================================ */
+const SCOUT_SIGNALS = ["Retail Expansion", "Population Growth", "Builder Demand", "Infrastructure Signals", "Land Availability", "Motivated Seller Pool"];
 
-// County data: [name, lat, lng, slug]
-const _GIS_RAW = {
-  FL: [
-    ["Alachua",29.74,-82.49,"alachua"],["Baker",30.33,-82.28,"baker"],["Bay",30.25,-85.65,"bay"],
-    ["Bradford",29.95,-82.17,"bradford"],["Brevard",28.26,-80.73,"brevard"],["Broward",26.12,-80.45,"broward"],
-    ["Calhoun",30.41,-85.19,"calhoun"],["Charlotte",26.96,-82.01,"charlotte"],["Citrus",28.87,-82.55,"citrus"],
-    ["Clay",29.99,-81.86,"clay"],["Collier",26.11,-81.30,"collier"],["Columbia",30.22,-82.62,"columbia"],
-    ["DeSoto",27.17,-81.83,"desoto"],["Dixie",29.59,-83.19,"dixie"],["Duval",30.33,-81.65,"duval"],
-    ["Escambia",30.65,-87.34,"escambia"],["Flagler",29.47,-81.35,"flagler"],["Franklin",29.84,-84.88,"franklin"],
-    ["Gadsden",30.57,-84.60,"gadsden"],["Gilchrist",29.72,-82.80,"gilchrist"],["Glades",26.94,-81.24,"glades"],
-    ["Gulf",29.92,-85.22,"gulf"],["Hamilton",30.49,-83.00,"hamilton"],["Hardee",27.50,-81.82,"hardee"],
-    ["Hendry",26.62,-81.05,"hendry"],["Hernando",28.56,-82.47,"hernando"],["Highlands",27.34,-81.35,"highlands"],
-    ["Hillsborough",27.90,-82.35,"hillsborough"],["Holmes",30.87,-85.82,"holmes"],["Indian River",27.70,-80.62,"indian-river"],
-    ["Jackson",30.79,-85.23,"jackson"],["Jefferson",30.43,-83.90,"jefferson"],["Lafayette",29.99,-83.19,"lafayette"],
-    ["Lake",28.76,-81.72,"lake"],["Lee",26.58,-81.80,"lee"],["Leon",30.46,-84.28,"leon"],
-    ["Levy",29.28,-82.78,"levy"],["Liberty",30.25,-84.90,"liberty"],["Madison",30.40,-83.47,"madison"],
-    ["Manatee",27.48,-82.38,"manatee"],["Marion",29.21,-82.14,"marion"],["Martin",27.09,-80.39,"martin"],
-    ["Miami-Dade",25.55,-80.63,"miami-dade"],["Monroe",24.64,-81.37,"monroe"],["Nassau",30.62,-81.77,"nassau"],
-    ["Okaloosa",30.72,-86.55,"okaloosa"],["Okeechobee",27.39,-80.90,"okeechobee"],["Orange",28.51,-81.27,"orange"],
-    ["Osceola",28.06,-81.00,"osceola"],["Palm Beach",26.64,-80.37,"palm-beach"],["Pasco",28.31,-82.43,"pasco"],
-    ["Pinellas",27.88,-82.73,"pinellas"],["Polk",27.95,-81.69,"polk"],["Putnam",29.63,-81.74,"putnam"],
-    ["Santa Rosa",30.73,-87.01,"santa-rosa"],["Sarasota",27.19,-82.33,"sarasota"],["Seminole",28.71,-81.26,"seminole"],
-    ["St. Johns",29.96,-81.48,"st-johns"],["St. Lucie",27.38,-80.44,"st-lucie"],["Sumter",28.70,-82.08,"sumter"],
-    ["Suwannee",30.18,-83.04,"suwannee"],["Taylor",30.05,-83.60,"taylor"],["Union",30.05,-82.36,"union"],
-    ["Volusia",29.05,-81.24,"volusia"],["Wakulla",30.13,-84.39,"wakulla"],["Walton",30.63,-86.15,"walton"],
-    ["Washington",30.62,-85.67,"washington"],
-  ],
-  TX: [
-    ["Anderson",31.82,-95.65,"anderson"],["Andrews",32.30,-102.64,"andrews"],["Angelina",31.25,-94.70,"angelina"],
-    ["Aransas",28.07,-96.97,"aransas"],["Archer",33.62,-98.70,"archer"],["Armstrong",34.96,-101.36,"armstrong"],
-    ["Atascosa",28.89,-98.53,"atascosa"],["Austin",29.89,-96.27,"austin"],["Bailey",34.07,-102.83,"bailey"],
-    ["Bandera",29.75,-99.25,"bandera"],["Bastrop",30.10,-97.31,"bastrop"],["Baylor",33.62,-99.22,"baylor"],
-    ["Bee",28.42,-97.74,"bee"],["Bell",31.05,-97.48,"bell"],["Bexar",29.45,-98.52,"bexar"],
-    ["Blanco",30.26,-98.40,"blanco"],["Borden",32.74,-101.43,"borden"],["Bosque",31.90,-97.65,"bosque"],
-    ["Bowie",33.44,-94.19,"bowie"],["Brazoria",29.17,-95.44,"brazoria"],["Brazos",30.66,-96.32,"brazos"],
-    ["Brewster",29.83,-103.25,"brewster"],["Briscoe",34.53,-100.56,"briscoe"],["Brooks",27.03,-98.22,"brooks"],
-    ["Brown",31.77,-99.01,"brown"],["Burleson",30.50,-96.61,"burleson"],["Burnet",30.79,-98.23,"burnet"],
-    ["Caldwell",29.83,-97.62,"caldwell"],["Calhoun",28.44,-96.63,"calhoun"],["Callahan",32.30,-99.37,"callahan"],
-    ["Cameron",26.14,-97.52,"cameron"],["Camp",32.97,-94.98,"camp"],["Carson",35.40,-101.36,"carson"],
-    ["Cass",33.08,-94.34,"cass"],["Castro",34.53,-102.26,"castro"],["Chambers",29.70,-94.65,"chambers"],
-    ["Cherokee",31.85,-95.15,"cherokee"],["Childress",34.53,-100.21,"childress"],["Clay",33.79,-98.22,"clay"],
-    ["Cochran",33.60,-102.83,"cochran"],["Coke",31.88,-100.53,"coke"],["Coleman",31.77,-99.45,"coleman"],
-    ["Collin",33.19,-96.58,"collin"],["Collingsworth",34.96,-100.27,"collingsworth"],["Colorado",29.62,-96.52,"colorado"],
-    ["Comal",29.81,-98.27,"comal"],["Comanche",31.95,-98.56,"comanche"],["Concho",31.32,-99.85,"concho"],
-    ["Cooke",33.66,-97.21,"cooke"],["Coryell",31.39,-97.75,"coryell"],["Cottle",34.08,-100.28,"cottle"],
-    ["Crane",31.43,-102.35,"crane"],["Crockett",30.72,-101.20,"crockett"],["Crosby",33.61,-101.30,"crosby"],
-    ["Culberson",30.22,-104.51,"culberson"],["Dallam",36.28,-102.60,"dallam"],["Dallas",32.77,-96.78,"dallas"],
-    ["Dawson",32.74,-101.95,"dawson"],["Deaf Smith",34.96,-102.60,"deaf-smith"],["Delta",33.39,-95.67,"delta"],
-    ["Denton",33.21,-97.13,"denton"],["DeWitt",29.09,-97.35,"dewitt"],["Dickens",33.62,-100.79,"dickens"],
-    ["Dimmit",28.43,-99.76,"dimmit"],["Donley",34.96,-100.81,"donley"],["Duval",27.68,-98.53,"duval"],
-    ["Eastland",32.31,-98.82,"eastland"],["Ector",31.85,-102.55,"ector"],["Edwards",29.98,-100.30,"edwards"],
-    ["El Paso",31.78,-106.45,"el-paso"],["Ellis",32.35,-96.81,"ellis"],["Erath",32.22,-98.20,"erath"],
-    ["Falls",31.25,-96.88,"falls"],["Fannin",33.59,-96.10,"fannin"],["Fayette",29.88,-96.91,"fayette"],
-    ["Fisher",32.74,-100.40,"fisher"],["Floyd",34.07,-101.30,"floyd"],["Foard",33.98,-99.78,"foard"],
-    ["Fort Bend",29.53,-95.77,"fort-bend"],["Franklin",33.17,-95.22,"franklin"],["Freestone",31.70,-96.15,"freestone"],
-    ["Frio",28.87,-99.11,"frio"],["Gaines",32.74,-102.64,"gaines"],["Galveston",29.26,-94.82,"galveston"],
-    ["Garza",33.18,-101.30,"garza"],["Gillespie",30.32,-98.94,"gillespie"],["Glasscock",31.87,-101.52,"glasscock"],
-    ["Goliad",28.66,-97.38,"goliad"],["Gonzales",29.45,-97.50,"gonzales"],["Gray",35.40,-100.81,"gray"],
-    ["Grayson",33.65,-96.68,"grayson"],["Gregg",32.48,-94.82,"gregg"],["Grimes",30.51,-95.98,"grimes"],
-    ["Guadalupe",29.61,-97.94,"guadalupe"],["Hale",34.07,-101.82,"hale"],["Hall",34.53,-100.68,"hall"],
-    ["Hamilton",31.71,-98.11,"hamilton"],["Hansford",36.28,-101.36,"hansford"],["Hardeman",34.30,-99.75,"hardeman"],
-    ["Hardin",30.34,-94.38,"hardin"],["Harris",29.85,-95.40,"harris"],["Harrison",32.55,-94.38,"harrison"],
-    ["Hartley",35.84,-102.60,"hartley"],["Haskell",33.17,-99.73,"haskell"],["Hays",29.99,-98.04,"hays"],
-    ["Hemphill",35.84,-100.27,"hemphill"],["Henderson",32.21,-95.85,"henderson"],["Hidalgo",26.30,-98.23,"hidalgo"],
-    ["Hill",31.99,-97.14,"hill"],["Hockley",33.61,-102.34,"hockley"],["Hood",32.43,-97.82,"hood"],
-    ["Hopkins",33.15,-95.55,"hopkins"],["Houston",31.33,-95.43,"houston"],["Howard",32.30,-101.44,"howard"],
-    ["Hudspeth",31.45,-105.37,"hudspeth"],["Hunt",33.13,-96.08,"hunt"],["Hutchinson",35.84,-101.36,"hutchinson"],
-    ["Irion",31.30,-100.98,"irion"],["Jack",33.23,-98.16,"jack"],["Jackson",28.96,-96.58,"jackson"],
-    ["Jasper",30.89,-94.03,"jasper"],["Jeff Davis",30.60,-104.13,"jeff-davis"],["Jefferson",30.03,-94.15,"jefferson"],
-    ["Jim Hogg",27.03,-98.70,"jim-hogg"],["Jim Wells",27.73,-98.09,"jim-wells"],["Johnson",32.38,-97.36,"johnson"],
-    ["Jones",32.74,-99.87,"jones"],["Karnes",28.89,-97.86,"karnes"],["Kaufman",32.60,-96.31,"kaufman"],
-    ["Kendall",29.94,-98.71,"kendall"],["Kenedy",26.93,-97.64,"kenedy"],["Kent",33.18,-100.79,"kent"],
-    ["Kerr",30.06,-99.35,"kerr"],["Kimble",30.49,-99.74,"kimble"],["King",33.62,-100.26,"king"],
-    ["Kinney",29.35,-100.42,"kinney"],["Kleberg",27.43,-97.80,"kleberg"],["Knox",33.60,-99.75,"knox"],
-    ["Lamar",33.67,-95.55,"lamar"],["Lamb",34.07,-102.35,"lamb"],["Lampasas",31.20,-98.25,"lampasas"],
-    ["La Salle",28.35,-99.10,"la-salle"],["Lavaca",29.38,-96.92,"lavaca"],["Lee",30.32,-96.97,"lee"],
-    ["Leon",31.29,-96.01,"leon"],["Liberty",30.07,-94.79,"liberty"],["Limestone",31.54,-96.63,"limestone"],
-    ["Lipscomb",36.28,-100.27,"lipscomb"],["Live Oak",28.35,-98.13,"live-oak"],["Llano",30.71,-98.66,"llano"],
-    ["Loving",31.84,-103.59,"loving"],["Lubbock",33.57,-101.85,"lubbock"],["Lynn",33.18,-101.82,"lynn"],
-    ["McCulloch",31.19,-99.35,"mcculloch"],["McLennan",31.55,-97.20,"mclennan"],["McMullen",28.35,-98.57,"mcmullen"],
-    ["Madison",30.94,-95.91,"madison"],["Marion",32.79,-94.36,"marion"],["Martin",32.30,-101.95,"martin"],
-    ["Mason",30.75,-99.23,"mason"],["Matagorda",28.83,-96.01,"matagorda"],["Maverick",28.74,-100.31,"maverick"],
-    ["Medina",29.35,-99.11,"medina"],["Menard",30.89,-99.79,"menard"],["Midland",31.87,-102.03,"midland"],
-    ["Milam",30.78,-96.99,"milam"],["Mills",31.49,-98.59,"mills"],["Mitchell",32.30,-100.92,"mitchell"],
-    ["Montague",33.68,-97.73,"montague"],["Montgomery",30.25,-95.50,"montgomery"],["Moore",35.84,-101.89,"moore"],
-    ["Morris",33.11,-94.73,"morris"],["Motley",34.07,-100.79,"motley"],["Nacogdoches",31.64,-94.66,"nacogdoches"],
-    ["Navarro",32.04,-96.46,"navarro"],["Newton",30.78,-93.72,"newton"],["Nolan",32.30,-100.41,"nolan"],
-    ["Nueces",27.73,-97.58,"nueces"],["Ochiltree",36.28,-100.81,"ochiltree"],["Oldham",35.40,-102.60,"oldham"],
-    ["Orange",30.12,-93.90,"orange"],["Palo Pinto",32.74,-98.29,"palo-pinto"],["Panola",31.99,-94.31,"panola"],
-    ["Parker",32.78,-97.80,"parker"],["Parmer",34.53,-102.78,"parmer"],["Pecos",30.79,-102.73,"pecos"],
-    ["Polk",30.79,-94.83,"polk"],["Potter",35.22,-101.85,"potter"],["Presidio",29.66,-104.22,"presidio"],
-    ["Rains",32.87,-95.79,"rains"],["Randall",34.96,-101.89,"randall"],["Reagan",31.38,-101.52,"reagan"],
-    ["Real",29.83,-99.82,"real"],["Red River",33.62,-95.04,"red-river"],["Reeves",31.32,-103.70,"reeves"],
-    ["Refugio",28.44,-97.16,"refugio"],["Roberts",35.84,-100.81,"roberts"],["Robertson",31.03,-96.59,"robertson"],
-    ["Rockwall",32.91,-96.39,"rockwall"],["Runnels",31.83,-99.98,"runnels"],["Rusk",32.12,-94.77,"rusk"],
-    ["Sabine",31.34,-93.90,"sabine"],["San Augustine",31.39,-94.19,"san-augustine"],["San Jacinto",30.57,-95.17,"san-jacinto"],
-    ["San Patricio",28.01,-97.52,"san-patricio"],["San Saba",31.16,-98.73,"san-saba"],["Schleicher",30.90,-100.53,"schleicher"],
-    ["Scurry",32.74,-100.92,"scurry"],["Shackelford",32.74,-99.35,"shackelford"],["Shelby",31.79,-94.15,"shelby"],
-    ["Sherman",36.28,-101.89,"sherman"],["Smith",32.37,-95.27,"smith"],["Somervell",32.22,-97.77,"somervell"],
-    ["Starr",26.56,-98.75,"starr"],["Stephens",32.74,-99.16,"stephens"],["Sterling",31.83,-101.00,"sterling"],
-    ["Stonewall",33.18,-100.26,"stonewall"],["Sutton",30.49,-100.54,"sutton"],["Swisher",34.53,-101.74,"swisher"],
-    ["Tarrant",32.74,-97.29,"tarrant"],["Taylor",32.30,-99.87,"taylor"],["Terrell",30.22,-102.07,"terrell"],
-    ["Terry",33.18,-102.34,"terry"],["Throckmorton",33.18,-99.22,"throckmorton"],["Titus",33.17,-94.97,"titus"],
-    ["Tom Green",31.38,-100.46,"tom-green"],["Travis",30.34,-97.78,"travis"],["Trinity",31.09,-95.13,"trinity"],
-    ["Tyler",30.78,-94.37,"tyler"],["Upshur",32.73,-94.93,"upshur"],["Upton",31.37,-102.04,"upton"],
-    ["Uvalde",29.35,-99.76,"uvalde"],["Val Verde",29.89,-101.15,"val-verde"],["Van Zandt",32.56,-95.87,"van-zandt"],
-    ["Victoria",28.82,-97.01,"victoria"],["Walker",30.73,-95.55,"walker"],["Waller",29.99,-95.99,"waller"],
-    ["Ward",31.51,-103.10,"ward"],["Washington",30.19,-96.39,"washington"],["Webb",27.76,-99.45,"webb"],
-    ["Wharton",29.31,-96.10,"wharton"],["Wheeler",35.40,-100.27,"wheeler"],["Wichita",33.90,-98.70,"wichita"],
-    ["Wilbarger",34.08,-99.23,"wilbarger"],["Willacy",26.47,-97.60,"willacy"],["Williamson",30.65,-97.60,"williamson"],
-    ["Wilson",29.18,-98.07,"wilson"],["Winkler",31.84,-103.06,"winkler"],["Wise",33.22,-97.66,"wise"],
-    ["Wood",32.78,-95.38,"wood"],["Yoakum",33.17,-102.83,"yoakum"],["Young",33.17,-98.70,"young"],
-    ["Zapata",27.03,-99.16,"zapata"],["Zavala",28.87,-99.76,"zavala"],
-  ],
-  TN: [
-    ["Anderson",36.11,-84.16,"anderson"],["Bedford",35.49,-86.46,"bedford"],["Benton",36.06,-88.01,"benton"],
-    ["Bledsoe",35.56,-85.18,"bledsoe"],["Blount",35.68,-83.94,"blount"],["Bradley",35.16,-84.87,"bradley"],
-    ["Campbell",36.39,-84.16,"campbell"],["Cannon",35.81,-86.07,"cannon"],["Carroll",35.97,-88.46,"carroll"],
-    ["Carter",36.30,-82.05,"carter"],["Cheatham",36.28,-87.08,"cheatham"],["Chester",35.44,-88.60,"chester"],
-    ["Claiborne",36.47,-83.66,"claiborne"],["Clay",36.55,-85.53,"clay"],["Cocke",35.94,-83.01,"cocke"],
-    ["Coffee",35.49,-86.08,"coffee"],["Crockett",35.98,-89.15,"crockett"],["Cumberland",35.95,-85.02,"cumberland"],
-    ["Davidson",36.17,-86.78,"davidson"],["Decatur",35.58,-88.11,"decatur"],["DeKalb",35.97,-85.80,"dekalb"],
-    ["Dickson",36.16,-87.37,"dickson"],["Dyer",36.04,-89.37,"dyer"],["Fayette",35.19,-89.38,"fayette"],
-    ["Fentress",36.39,-84.93,"fentress"],["Franklin",35.13,-86.11,"franklin"],["Gibson",35.91,-88.93,"gibson"],
-    ["Giles",35.19,-87.02,"giles"],["Grainger",36.26,-83.51,"grainger"],["Greene",36.17,-82.83,"greene"],
-    ["Grundy",35.35,-85.75,"grundy"],["Hamblen",36.21,-83.25,"hamblen"],["Hamilton",35.19,-85.17,"hamilton"],
-    ["Hancock",36.53,-83.24,"hancock"],["Hardeman",35.21,-88.99,"hardeman"],["Hardin",35.23,-88.25,"hardin"],
-    ["Hawkins",36.43,-82.97,"hawkins"],["Haywood",35.64,-89.25,"haywood"],["Henderson",35.65,-88.39,"henderson"],
-    ["Henry",36.31,-88.31,"henry"],["Hickman",35.78,-87.47,"hickman"],["Houston",36.36,-87.67,"houston"],
-    ["Humphreys",36.08,-87.76,"humphreys"],["Jackson",36.35,-85.66,"jackson"],["Jefferson",36.03,-83.43,"jefferson"],
-    ["Johnson",36.43,-81.81,"johnson"],["Knox",35.99,-83.94,"knox"],["Lake",36.47,-89.41,"lake"],
-    ["Lauderdale",35.77,-89.62,"lauderdale"],["Lawrence",35.24,-87.34,"lawrence"],["Lewis",35.55,-87.52,"lewis"],
-    ["Lincoln",35.15,-86.58,"lincoln"],["Loudon",35.73,-84.34,"loudon"],["McMinn",35.44,-84.59,"mcminn"],
-    ["McNairy",35.07,-88.57,"mcnairy"],["Macon",36.53,-86.00,"macon"],["Madison",35.61,-88.83,"madison"],
-    ["Marion",35.08,-85.61,"marion"],["Marshall",35.45,-86.81,"marshall"],["Maury",35.61,-87.08,"maury"],
-    ["Meigs",35.52,-84.82,"meigs"],["Monroe",35.45,-84.27,"monroe"],["Montgomery",36.53,-87.36,"montgomery"],
-    ["Moore",35.29,-86.37,"moore"],["Morgan",36.08,-84.59,"morgan"],["Obion",36.42,-89.07,"obion"],
-    ["Overton",36.39,-85.32,"overton"],["Perry",35.62,-87.87,"perry"],["Pickett",36.57,-85.01,"pickett"],
-    ["Polk",35.13,-84.53,"polk"],["Putnam",36.16,-85.50,"putnam"],["Rhea",35.51,-84.93,"rhea"],
-    ["Roane",35.87,-84.52,"roane"],["Robertson",36.53,-86.88,"robertson"],["Rutherford",35.84,-86.42,"rutherford"],
-    ["Scott",36.43,-84.51,"scott"],["Sequatchie",35.38,-85.38,"sequatchie"],["Sevier",35.79,-83.55,"sevier"],
-    ["Shelby",35.15,-89.97,"shelby"],["Smith",36.25,-85.95,"smith"],["Stewart",36.50,-87.83,"stewart"],
-    ["Sullivan",36.51,-82.37,"sullivan"],["Sumner",36.47,-86.46,"sumner"],["Tipton",35.51,-89.75,"tipton"],
-    ["Trousdale",36.39,-86.16,"trousdale"],["Unicoi",36.13,-82.47,"unicoi"],["Union",36.29,-83.82,"union"],
-    ["Van Buren",35.70,-85.44,"van-buren"],["Warren",35.68,-85.77,"warren"],["Washington",36.30,-82.47,"washington"],
-    ["Wayne",35.21,-87.76,"wayne"],["Weakley",36.52,-88.71,"weakley"],["White",35.90,-85.48,"white"],
-    ["Williamson",35.89,-86.89,"williamson"],["Wilson",36.15,-86.25,"wilson"],
-  ],
-  NC: [
-    ["Alamance",36.04,-79.40,"alamance"],["Alexander",35.92,-81.18,"alexander"],["Alleghany",36.49,-81.13,"alleghany"],
-    ["Anson",35.01,-80.10,"anson"],["Ashe",36.43,-81.50,"ashe"],["Avery",36.08,-81.93,"avery"],
-    ["Beaufort",35.47,-76.82,"beaufort"],["Bertie",36.07,-76.99,"bertie"],["Bladen",34.61,-78.56,"bladen"],
-    ["Brunswick",34.06,-78.25,"brunswick"],["Buncombe",35.57,-82.53,"buncombe"],["Burke",35.75,-81.71,"burke"],
-    ["Cabarrus",35.39,-80.58,"cabarrus"],["Caldwell",35.95,-81.55,"caldwell"],["Camden",36.34,-76.17,"camden"],
-    ["Carteret",34.84,-76.85,"carteret"],["Caswell",36.39,-79.33,"caswell"],["Catawba",35.66,-81.21,"catawba"],
-    ["Chatham",35.70,-79.25,"chatham"],["Cherokee",35.14,-84.02,"cherokee"],["Chowan",36.10,-76.59,"chowan"],
-    ["Clay",35.06,-83.76,"clay"],["Cleveland",35.35,-81.57,"cleveland"],["Columbus",34.27,-78.67,"columbus"],
-    ["Craven",35.11,-77.08,"craven"],["Cumberland",35.05,-78.88,"cumberland"],["Currituck",36.47,-76.01,"currituck"],
-    ["Dare",35.74,-75.83,"dare"],["Davidson",35.79,-80.21,"davidson"],["Davie",35.93,-80.55,"davie"],
-    ["Duplin",34.93,-77.93,"duplin"],["Durham",35.99,-78.90,"durham"],["Edgecombe",35.91,-77.60,"edgecombe"],
-    ["Forsyth",36.10,-80.25,"forsyth"],["Franklin",36.09,-78.28,"franklin"],["Gaston",35.29,-81.18,"gaston"],
-    ["Gates",36.44,-76.69,"gates"],["Graham",35.36,-83.84,"graham"],["Granville",36.31,-78.67,"granville"],
-    ["Greene",35.47,-77.68,"greene"],["Guilford",36.07,-79.79,"guilford"],["Halifax",36.25,-77.69,"halifax"],
-    ["Harnett",35.35,-78.88,"harnett"],["Haywood",35.56,-83.00,"haywood"],["Henderson",35.34,-82.48,"henderson"],
-    ["Hertford",36.35,-77.04,"hertford"],["Hoke",35.02,-79.24,"hoke"],["Hyde",35.40,-76.23,"hyde"],
-    ["Iredell",35.80,-80.87,"iredell"],["Jackson",35.28,-83.13,"jackson"],["Johnston",35.51,-78.38,"johnston"],
-    ["Jones",34.92,-77.38,"jones"],["Lee",35.47,-79.18,"lee"],["Lenoir",35.23,-77.64,"lenoir"],
-    ["Lincoln",35.49,-81.22,"lincoln"],["McDowell",35.68,-82.00,"mcdowell"],["Macon",35.15,-83.43,"macon"],
-    ["Madison",35.85,-82.73,"madison"],["Martin",35.84,-77.10,"martin"],["Mecklenburg",35.26,-80.84,"mecklenburg"],
-    ["Mitchell",36.00,-82.16,"mitchell"],["Montgomery",35.33,-79.89,"montgomery"],["Moore",35.31,-79.49,"moore"],
-    ["Nash",35.97,-77.98,"nash"],["New Hanover",34.19,-77.88,"new-hanover"],["Northampton",36.41,-77.38,"northampton"],
-    ["Onslow",34.75,-77.45,"onslow"],["Orange",35.93,-79.13,"orange"],["Pamlico",35.15,-76.67,"pamlico"],
-    ["Pasquotank",36.28,-76.22,"pasquotank"],["Pender",34.53,-77.91,"pender"],["Perquimans",36.19,-76.44,"perquimans"],
-    ["Person",36.39,-78.97,"person"],["Pitt",35.59,-77.36,"pitt"],["Polk",35.30,-82.17,"polk"],
-    ["Randolph",35.71,-79.81,"randolph"],["Richmond",34.96,-79.86,"richmond"],["Robeson",34.64,-79.10,"robeson"],
-    ["Rockingham",36.39,-79.78,"rockingham"],["Rowan",35.64,-80.54,"rowan"],["Rutherford",35.40,-81.92,"rutherford"],
-    ["Sampson",34.99,-78.37,"sampson"],["Scotland",34.83,-79.49,"scotland"],["Stanly",35.31,-80.25,"stanly"],
-    ["Stokes",36.40,-80.24,"stokes"],["Surry",36.41,-80.68,"surry"],["Swain",35.49,-83.49,"swain"],
-    ["Transylvania",35.20,-82.79,"transylvania"],["Tyrrell",35.87,-76.19,"tyrrell"],["Union",35.00,-80.53,"union"],
-    ["Vance",36.36,-78.41,"vance"],["Wake",35.79,-78.65,"wake"],["Warren",36.39,-78.12,"warren"],
-    ["Washington",35.84,-76.67,"washington"],["Watauga",36.23,-81.70,"watauga"],["Wayne",35.37,-77.98,"wayne"],
-    ["Wilkes",36.16,-81.17,"wilkes"],["Wilson",35.72,-77.95,"wilson"],["Yadkin",36.16,-80.67,"yadkin"],
-    ["Yancey",35.89,-82.30,"yancey"],
-  ],
-};
+function MarketScoutTab({ onCreateBox, data, update }) {
+  const [loc, setLoc] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState(null);
+  const [error, setError] = useState("");
+  const [lotFind, setLotFind] = useState(null); // {q, seq} → RadarMap flies to the lot + owner card
+  const scoutHistory = (data && data.scout) ? data.scout : {};
 
-// Build county lookup map
-const GIS_COUNTIES = {};
-
-
-Object.entries(_GIS_RAW).forEach(([st, arr]) => {
-  GIS_COUNTIES[st] = {};
-  arr.forEach(([name, lat, lng, slug]) => { GIS_COUNTIES[st][name] = { lat, lng, slug }; });
-});
-
-// Known public ArcGIS parcel FeatureServer/MapServer query endpoints
-const GIS_PARCEL_SERVICES = {
-  "FL_Alachua":      "https://maps.acpafl.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Hillsborough": "https://gis.hcpafl.org/arcgis/rest/services/HCPA/Parcels/FeatureServer/0",
-  "FL_Orange":       "https://maps.ocpafl.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Pinellas":     "https://maps.pcpao.gov/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Pasco":        "https://gis.pascocountyfl.net/arcgis/rest/services/PAO/Parcels/MapServer/0",
-  "FL_Manatee":      "https://www.mymanatee.org/arcgis/rest/services/PAO/Parcels/FeatureServer/0",
-  "FL_Lee":          "https://maps.leepa.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Sarasota":     "https://gis.sc-pa.com/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Volusia":      "https://vcpa.vcgov.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Brevard":      "https://bcpagis.brevardfl.gov/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Polk":         "https://gis.polkpa.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Seminole":     "https://www.scpafl.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_St. Johns":    "https://www.sjcpa.us/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Lake":         "https://www.lakecopropappr.com/arcgis/rest/services/Parcels/MapServer/0",
-  "FL_Duval":        "https://maps.coj.net/arcgis/rest/services/Property/Parcels/MapServer/0",
-  "FL_Palm Beach":   "https://maps.pbcgov.org/arcgis/rest/services/Property/Parcels/MapServer/0",
-  "FL_Broward":      "https://gis.bcpa.net/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Miami-Dade":   "https://gisservices.miamidade.gov/arcgis/rest/services/Property/Parcels/MapServer/0",
-  "FL_Collier":      "https://gis.colliercountyfl.gov/arcgis/rest/services/PAO/Parcels/MapServer/0",
-  "FL_Charlotte":    "https://www.ccappraiser.com/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Marion":       "https://www.pa.marion.fl.us/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Hernando":     "https://gis.hernandocounty.us/arcgis/rest/services/PAO/Parcels/MapServer/0",
-  "FL_Citrus":       "https://gis.citruspa.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_Flagler":      "https://gis.flaglerpa.org/arcgis/rest/services/Public/Parcels/MapServer/0",
-  "FL_St. Lucie":    "https://gis.paslc.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "FL_Martin":       "https://gis.pa.martin.fl.us/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Harris":       "https://arcgis.hcad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Dallas":       "https://gis.dallascad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Tarrant":      "https://gis.tad.org/arcgis/rest/services/Parcels/FeatureServer/0",
-  "TX_Bexar":        "https://gis.bcad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Travis":       "https://maps.traviscad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Collin":       "https://gis.collincad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Denton":       "https://gis.dentoncad.com/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Fort Bend":    "https://gis.fbcad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Montgomery":   "https://gis.mcad-tx.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Williamson":   "https://gis.wcad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Galveston":    "https://gis.galvestoncad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Nueces":       "https://gis.nuecescad.net/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_El Paso":      "https://gis.epcad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TX_Brazoria":     "https://gis.brazoriacad.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TN_Davidson":     "https://maps.nashville.gov/arcgis/rest/services/Property/Parcels/MapServer/0",
-  "TN_Knox":         "https://maps.knoxmpc.org/arcgis/rest/services/Parcels/MapServer/0",
-  "TN_Hamilton":     "https://gis.hamiltontn.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "TN_Shelby":       "https://maps.shelbycountytn.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "TN_Rutherford":   "https://gis.rutherfordcountytn.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "TN_Williamson":   "https://gis.williamsoncounty-tn.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "TN_Sullivan":     "https://gis.sullivancountytn.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "TN_Montgomery":   "https://gis.mcgtn.org/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_Wake":         "https://maps.wakegov.com/arcgis/rest/services/Property/Parcels/FeatureServer/0",
-  "NC_Mecklenburg":  "https://maps.mecklenburgcountync.gov/arcgis/rest/services/Parcels/FeatureServer/0",
-  "NC_Guilford":     "https://gis.guilfordcountync.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_Forsyth":      "https://gis.forsyth.cc/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_Durham":       "https://gis.durhamnc.gov/arcgis/rest/services/Property/Parcels/MapServer/0",
-  "NC_Buncombe":     "https://gis.buncombecounty.org/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_Cumberland":   "https://gis.co.cumberland.nc.us/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_Cabarrus":     "https://gis.cabarruscounty.us/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_Gaston":       "https://gis.gastongov.com/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_Iredell":      "https://gis.iredellcountync.gov/arcgis/rest/services/Parcels/MapServer/0",
-  "NC_New Hanover":  "https://gis.nhcgov.com/arcgis/rest/services/Parcels/MapServer/0",
-};
-
-/* Statewide parcel services — ONE endpoint covers every county in the state.
-   FL/TX/TN are ArcGIS-Online-hosted and send CORS headers, so they load directly
-   in the browser with no proxy. NC is the state's own server (no CORS) and routes
-   through the user's proxy. All four verified live + returning polygon geometry. */
-const GIS_STATE_PARCELS = {
-  FL: "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0",
-  TX: "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
-  TN: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Tennessee_Property_Boundaries_Public_Use/FeatureServer/0",
-  NC: "https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/MapServer/1",
-};
-
-// APN / parcel-id field name on each statewide service (used by APN search; omit = no APN search)
-const GIS_STATE_APN_FIELD = { FL: "PARCEL_ID", TX: "GEO_ID", TN: "PARCELID", NC: "PARNO" };
-
-// Bounding-box center [lat, lng] of a GeoJSON feature (for flying to a found parcel)
-function featCenter(feat) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  const walk = (a) => {
-    if (typeof a[0] === "number") { minX = Math.min(minX, a[0]); maxX = Math.max(maxX, a[0]); minY = Math.min(minY, a[1]); maxY = Math.max(maxY, a[1]); }
-    else a.forEach(walk);
+  const findLot = (target) => {
+    const q = String(target != null ? target : loc).trim();
+    if (!q) return;
+    setError("");
+    setLotFind({ q, seq: Date.now() });
   };
-  if (feat && feat.geometry && feat.geometry.coordinates) walk(feat.geometry.coordinates);
-  return minX === Infinity ? null : [(minY + maxY) / 2, (minX + maxX) / 2];
-}
 
-const sqftToAcres = (v) => { const n = parseFloat(String(v || "").replace(/[^0-9.]/g, "")); return n > 0 ? n / 43560 : 0; };
-
-/* ---- On-the-fly comps engine ----
-   Only states whose parcel layer carries sale price + date can do comps. FL's cadastral
-   does (SALE_PRC1/SALE_YR1) for all 10.8M parcels; other states need a sales feed. */
-const COMP_CONFIG = {
-  FL: { service: GIS_STATE_PARCELS.FL, saleP: "SALE_PRC1", saleY: "SALE_YR1", saleM: "SALE_MO1",
-        sqft: "LND_SQFOOT", addr: "PHY_ADDR1", use: "DOR_UC",
-        vacant: ["000","00","010","10","040","40","070","70","099","99"] },
-};
-
-// Comps split into UNIMPROVED (vacant land = offer basis) and IMPROVED (reference).
-// 3 each, matched on acreage, closest + most recent, ≤~1.3mi (prefer ≤1mi). One fast
-// bbox query (no server-side WHERE — slow on 10.8M parcels), everything filtered client-side.
-async function fetchComps(lat, lng, subjectAcres, state, proxy) {
-  const cfg = COMP_CONFIG[state];
-  if (!cfg) return { unsupported: true };
-  const yr = new Date().getFullYear();
-  const mi = 0.8, dlat = mi / 69, dlng = mi / (69 * Math.cos(lat * Math.PI / 180));
-  const params = new URLSearchParams({
-    geometry: `${lng - dlng},${lat - dlat},${lng + dlng},${lat + dlat}`,
-    geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
-    outFields: [cfg.addr, cfg.saleP, cfg.saleY, cfg.saleM, cfg.sqft, cfg.use].join(","),
-    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "1500", f: "json",
-  });
-  let feats;
-  try { const r = await corsFetch(`${cfg.service}/query?${params}`, { timeout: 22000, proxy }); const j = await r.json(); feats = j.features || []; }
-  catch (_) { return { timeout: true }; }
-  const A = subjectAcres > 0 ? subjectAcres : 0;
-  const sold = feats.map((ft) => {
-    const c = ft.centroid, p = ft.attributes || {};
-    if (!c) return null;
-    const acres = sqftToAcres(p[cfg.sqft]), price = parseFloat(p[cfg.saleP]) || 0, y = parseFloat(p[cfg.saleY]) || 0;
-    if (!(acres > 0 && price > 2000 && y >= yr - 5)) return null;
-    return { addr: String(p[cfg.addr] || "").trim(), m: p[cfg.saleM], y, price, acres, ppa: Math.round(price / acres),
-      dist: Math.hypot((c.y - lat) * 69, (c.x - lng) * 69 * Math.cos(lat * Math.PI / 180)),
-      vacant: cfg.vacant.includes(String(p[cfg.use] || "").trim()) };
-  }).filter(Boolean);
-  // rank: prefer within 1mi, then most recent, then closest
-  const rank = (arr) => arr.slice().sort((a, b) => (a.dist <= 1 ? 0 : 1) - (b.dist <= 1 ? 0 : 1) || b.y - a.y || a.dist - b.dist);
-  const pick3 = (pool) => {
-    const band = A > 0 ? pool.filter((c) => c.acres >= A * 0.5 && c.acres <= A * 2) : pool;
-    let chosen = rank(band).slice(0, 3);
-    if (chosen.length < 3) chosen = chosen.concat(rank(pool.filter((c) => !chosen.includes(c))).slice(0, 3 - chosen.length));
-    const ppas = chosen.filter((c) => c.ppa > 0).map((c) => c.ppa);
-    const avg = ppas.length ? Math.round(ppas.reduce((a, b) => a + b, 0) / ppas.length) : 0;
-    return { comps: chosen, avg, est: A > 0 ? Math.round(avg * A) : 0 };
+  const verdictColor = (v) => {
+    if (!v) return C.faint;
+    if (v.includes("FIRE")) return "#D8430E";
+    if (v.includes("HEATING")) return C.orange;
+    if (v.includes("WATCH")) return C.amber;
+    if (v.includes("EARLY")) return C.blue;
+    return C.faint;
   };
-  const unimproved = pick3(sold.filter((c) => c.vacant));
-  const improved = pick3(sold.filter((c) => !c.vacant));
-  const dists = [...unimproved.comps, ...improved.comps].map((c) => c.dist);
-  return { improved, unimproved, subjectAcres: A,
-    radius: dists.length ? Math.min(2, Math.max(1, Math.ceil(Math.max(...dists) * 10) / 10)) : 1 };
-}
 
-// Side-by-side comp columns — unimproved (offer basis) vs improved (reference). pal = palette.
-function CompsColumns({ res, pal }) {
-  const col = (label, sub, data, hot) => (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: hot ? pal.accent : pal.dim, marginBottom: 5 }}>{label}</div>
-      <div style={{ background: hot ? pal.hot : pal.panel, border: `1px solid ${hot ? pal.accent : pal.line}`, borderRadius: 8, padding: "7px 9px", marginBottom: 6 }}>
-        <div style={{ fontSize: 8.5, color: pal.dim, textTransform: "uppercase", letterSpacing: ".04em" }}>{sub}</div>
-        <div style={{ fontSize: 17, fontWeight: 800, color: hot ? pal.accent : pal.text, lineHeight: 1.1 }}>{data.est ? "$" + data.est.toLocaleString() : "—"}</div>
-        <div className="lc-mono" style={{ fontSize: 9.5, color: pal.dim }}>avg ${data.avg.toLocaleString()}/ac</div>
-      </div>
-      <div style={{ display: "grid", gap: 4 }}>
-        {data.comps.length ? data.comps.map((c, i) => (
-          <div key={i} style={{ lineHeight: 1.25 }}>
-            <div style={{ fontSize: 10.5, color: pal.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.addr || "Vacant parcel"}</div>
-            <div className="lc-mono" style={{ fontSize: 9, color: pal.dim }}>{c.m}/{c.y} · {c.acres.toFixed(2)}ac · {c.dist.toFixed(1)}mi · ${Math.round(c.price / 1000)}k</div>
-          </div>
-        )) : <div style={{ fontSize: 10.5, color: pal.dim }}>None found nearby</div>}
-      </div>
-    </div>
-  );
+  const runScout = async (target) => {
+    const market = (target || loc).trim();
+    if (!market || loading) return;
+    setLoc(market); setLoading(true); setError(""); setReport(null);
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: `You are a real estate market intelligence analyst for a land wholesaler who sells vacant lots to home builders. Use web search to analyze "${market}" as a builder market. Look for: retail precursor chains (Starbucks, Chick-fil-A, Dollar General, AutoZone, hospitals) arriving ahead of homes; population growth; builder/permit activity; infrastructure projects; remaining raw land; and motivated seller potential (longtime owners, farmers, heirs).
+
+Respond with ONLY a JSON object — no markdown fences, no preamble, no text after. Exact schema:
+{"market":"${market}","lat":decimal latitude,"lng":decimal longitude,"score":0-100,"verdict":"ON FIRE"|"HEATING UP"|"WATCH LIST"|"TOO EARLY"|"COLD","summary":"2 sentences on the market","signals":[{"name":"Retail Expansion","score":0-100,"insight":"1 sentence"},{"name":"Population Growth","score":0-100,"insight":"1 sentence"},{"name":"Builder Demand","score":0-100,"insight":"1 sentence"},{"name":"Infrastructure Signals","score":0-100,"insight":"1 sentence"},{"name":"Land Availability","score":0-100,"insight":"1 sentence"},{"name":"Motivated Seller Pool","score":0-100,"insight":"1 sentence"}],"retail":["brands recently arrived or announced"],"actions":["4-5 specific next steps for this wholesaler"],"similar":["3 similar markets to scout"],"risks":"1 sentence on the main risk"}`,
+          }],
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+        }),
+      });
+      const resJson = await response.json();
+      if (resJson && resJson.type === "error") throw new Error(resJson.error?.message || "API returned an error.");
+      if (resJson && resJson.error) throw new Error(resJson.error.message || "API error.");
+      const fullText = (resJson.content || []).map(b => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n");
+      if (!fullText.trim()) throw new Error("No response text returned — try again in a moment.");
+      const match = fullText.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("Analysis came back unstructured — hit Scout again.");
+      const parsed = JSON.parse(match[0].replace(/```json|```/g, "").trim());
+      setReport(parsed);
+      // persist so the recon map remembers every scouted market
+      const key = market.trim().toLowerCase();
+      if (update && data) update({ ...data, scout: { ...(data.scout || {}), [key]: { ...parsed, market, scoutedAt: new Date().toISOString().slice(0,10) } } });
+    } catch (e) {
+      setError(`Scout failed: ${e.message || e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const county = report ? String(report.market || loc).split(",")[0].replace(/county/i, "").trim() : "";
+  const state = report ? (String(report.market || loc).split(",")[1] || "").trim() : "";
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 10 }}>
-        {col("Unimproved · Land", "Your offer basis", res.unimproved, true)}
-        {col("Improved · Reference", "If a home were built", res.improved, false)}
+      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Market scout</div>
+      <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>The radar below ranks FL, TX, NC and TN counties on real building-permit data — click a hotspot for its demand dossier, scan live land sales around it (FL), or deep-scout it with web research. Type a county to scout the market, or paste an APN / FL property address to jump straight to that lot and its owner.</div>
+
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input className="lc-input" style={{ flex: 1, minWidth: 220 }} value={loc} onChange={e => setLoc(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { if (looksLikeLotQuery(loc)) findLot(); else runScout(); } }}
+            placeholder="County market — or an APN / property address to jump to a lot" />
+          <Btn onClick={() => findLot()} kind="ghost">⌖ Find lot</Btn>
+          <Btn onClick={() => runScout()}>{loading ? "Scouting…" : "Scout market ↗"}</Btn>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: C.faint }}>Try:</span>
+          {["Hays County, TX", "Pasco County, FL", "St. Johns County, FL", "Maury County, TN", "Kaufman County, TX"].map(m => (
+            <button key={m} type="button" onClick={() => runScout(m)}
+              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, border: `1px solid ${C.line}`, background: "#fff", color: C.ink, cursor: "pointer", fontWeight: 600 }}>{m}</button>
+          ))}
+        </div>
       </div>
-      <div style={{ fontSize: 8.5, color: pal.dim, marginTop: 7, lineHeight: 1.45 }}>3 closest recent sales ≤{res.radius}mi, matched on acreage. Unimproved = land offer; improved = value if built — use if they push back on price.</div>
+
+      <RadarMap history={scoutHistory} activeMarket={report ? (report.market || loc) : loc} onSelect={(rep) => { setReport(rep); setLoc(rep.market); setError(""); }} onScout={(m) => runScout(m)} onCreateBox={onCreateBox} data={data} update={update} lotFind={lotFind} />
+
+      {loading && (
+        <div style={{ marginTop: 14, padding: 24, textAlign: "center", color: C.faint, fontSize: 13.5, border: `2px dashed ${C.line}`, borderRadius: 8 }}>
+          Running live web research on {loc} — retail precursors, permits, population, land supply… (15–30 seconds)
+        </div>
+      )}
+      {error && (
+        <div style={{ marginTop: 14, padding: 14, background: C.redPale, border: `1px solid ${C.red}`, borderRadius: 8, color: C.red, fontSize: 13.5 }}>{error}</div>
+      )}
+
+      {report && (
+        <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+          {/* Verdict banner */}
+          <div style={{ background: C.panel, border: `1px solid ${verdictColor(report.verdict)}`, borderLeft: `6px solid ${verdictColor(report.verdict)}`, borderRadius: 8, padding: 18, display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div className="lc-mono" style={{ fontSize: 48, fontWeight: 600, color: verdictColor(report.verdict), lineHeight: 1 }}>{report.score}</div>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <span className="lc-stamp" style={{ color: verdictColor(report.verdict), fontSize: 13 }}>{report.verdict}</span>
+              <div className="lc-display" style={{ fontSize: 19, fontWeight: 800, textTransform: "uppercase", marginTop: 6 }}>{report.market}</div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.6, marginTop: 4 }}>{report.summary}</div>
+              {report.risks && <div style={{ fontSize: 12.5, color: C.amber, marginTop: 6 }}>⚠ {report.risks}</div>}
+            </div>
+            <Btn onClick={() => onCreateBox(county, state)}>+ Start a buy box here</Btn>
+          </div>
+
+          {/* Signal bars */}
+          <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }}>
+            <div className="lc-label" style={{ marginBottom: 10 }}>Signal scores</div>
+            {(report.signals || []).map((s, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 700, marginBottom: 3 }}>
+                  <span>{s.name}</span><span className="lc-mono" style={{ color: C.green }}>{s.score}</span>
+                </div>
+                <div style={{ height: 7, background: "#E8EAE2", borderRadius: 99, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.min(100, Math.max(0, s.score))}%`, height: "100%", background: s.score >= 75 ? C.orange : s.score >= 50 ? C.amber : C.faint, borderRadius: 99 }} />
+                </div>
+                <div style={{ fontSize: 12, color: C.faint, marginTop: 3 }}>{s.insight}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Retail + actions */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+            {report.retail && report.retail.length > 0 && (
+              <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }}>
+                <div className="lc-label" style={{ marginBottom: 8 }}>Retail precursors spotted</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {report.retail.map((r, i) => <span key={i} style={{ fontSize: 12, fontWeight: 600, padding: "4px 10px", borderRadius: 99, background: C.greenPale, color: C.green, border: `1px solid ${C.green}` }}>{r}</span>)}
+                </div>
+              </div>
+            )}
+            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }}>
+              <div className="lc-label" style={{ marginBottom: 8 }}>Your action plan</div>
+              <ol style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
+                {(report.actions || []).map((a, i) => <li key={i} style={{ fontSize: 13, lineHeight: 1.5 }}>{a}</li>)}
+              </ol>
+            </div>
+          </div>
+
+          {/* Similar markets */}
+          {report.similar && report.similar.length > 0 && (
+            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }}>
+              <div className="lc-label" style={{ marginBottom: 8 }}>Similar markets to scout next</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {report.similar.map((m, i) => (
+                  <button key={i} type="button" onClick={() => runScout(m)}
+                    style={{ fontSize: 12.5, fontWeight: 700, padding: "6px 14px", borderRadius: 99, border: `1px solid ${C.orange}`, background: "#fff", color: C.orangeDark, cursor: "pointer" }}>{m} ↗</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ fontSize: 11.5, color: C.faint, textAlign: "center" }}>AI-generated scores from live web research. Verify with county records and MLS before committing capital.</div>
+        </div>
+      )}
     </div>
   );
 }
 
-// Government URL generators per state
-function getCountyUrls(state, name, slug) {
-  const s = slug || name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-  if (state === "FL") return {
-    assessor: `https://www.${s}pa.gov`,
-    taxCollector: `https://www.${s}tc.com`,
-    auction: `https://${s}.realtaxdeed.com`,
-    gis: `https://gis.${s}county.gov`,
-  };
-  if (state === "TX") return {
-    assessor: `https://www.${s}cad.org`,
-    taxCollector: `https://www.${s}county.gov/tax-assessor`,
-    auction: `https://www.${s}county.gov/tax-sales`,
-    gis: `https://gis.${s}county.gov`,
-  };
-  if (state === "TN") return {
-    assessor: `https://assessoroftennessee.com/property-search?county=${encodeURIComponent(name)}`,
-    taxCollector: `https://tntrustee.com/${s}`,
-    auction: `https://www.tntaxauctions.com/?county=${encodeURIComponent(name)}`,
-    gis: `https://gis.${s}county.gov`,
-  };
-  if (state === "NC") return {
-    assessor: `https://www.${s}countync.gov/departments/tax`,
-    taxCollector: `https://www.${s}countync.gov/departments/tax/tax-bill-search`,
-    auction: `https://www.${s}countync.gov/departments/tax/delinquent-tax-liens`,
-    gis: `https://www.${s}countync.gov/departments/gis`,
-  };
-  const g = (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
-  return {
-    assessor: g(`${name} County ${state} property appraiser parcel search`),
-    taxCollector: g(`${name} County ${state} tax collector delinquent property tax`),
-    auction: g(`${name} County ${state} tax deed sale auction list`),
-    gis: g(`${name} County ${state} GIS parcel viewer map`),
-  };
-}
+/* ============================================================
+   TAB — DELINQUENCY HUB
+   Multi-county tax-delinquency recon: live web research finds
+   each county's delinquent list, format, and next tax sale.
+   Results are cached in your saved data — refresh anytime.
+   ============================================================ */
+function delinqKey(county, state) { return `${county.trim().toLowerCase()}|${state.trim().toLowerCase()}`; }
 
-// Singleton Leaflet loader
-let _leafletLoading = null;
-function loadLeaflet() {
-  if (window.L) return Promise.resolve(window.L);
-  if (_leafletLoading) return _leafletLoading;
-  _leafletLoading = new Promise((resolve, reject) => {
-    const css = document.createElement("link");
-    css.rel = "stylesheet";
-    css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-    document.head.appendChild(css);
-    const js = document.createElement("script");
-    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    js.onload = () => {
-      const rot = document.createElement("script");
-      rot.src = "https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js";
-      rot.onload = () => resolve(window.L);
-      rot.onerror = () => resolve(window.L);
-      document.head.appendChild(rot);
-    };
-    js.onerror = reject;
-    document.head.appendChild(js);
+async function researchCounty(county, state) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: `You are a research assistant for a vacant-land investor. Use web search to find how to obtain the CURRENT delinquent property tax list for ${county} County, ${state}, and details on their tax sales. Find: the official tax collector / treasurer page for delinquent taxes, whether the delinquent list is downloadable (PDF/Excel/web portal) or requires a public records request, any cost, the next tax deed or tax lien sale date if announced, and where sales are held (e.g. RealAuction, Bid4Assets, GovEase, in-person).
+
+Respond with ONLY a JSON object — no markdown fences, no preamble, no trailing text. Exact schema:
+{"county":"${county}","state":"${state}","listFormat":"PDF"|"Excel"|"Web portal"|"Records request"|"Unknown","howToGet":"2-3 sentences with exact steps","cost":"free or fee details","requestRequired":true|false,"nextSaleDate":"date or 'not announced'","saleType":"tax deed"|"tax lien"|"both"|"unknown","salePlatform":"platform or location","links":[{"name":"short label","url":"https://..."}],"tip":"1 sentence insider tip for working this county's list"}
+Include up to 4 links: the delinquent list page, the tax collector page, the sale/auction page, and the records request page if applicable. Only include URLs you actually found.`,
+      }],
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+    }),
   });
-  return _leafletLoading;
+  const data = await response.json();
+  const fullText = (data.content || []).map(b => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n");
+  const match = fullText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("no result");
+  return JSON.parse(match[0].replace(/```json|```/g, "").trim());
 }
 
-// County GIS servers usually don't send CORS headers, so browser fetches are blocked.
-// corsFetch tries the request directly first (works natively / on CORS-enabled hosts),
-// then falls back through public CORS relays. Nominatim allows CORS so it skips this.
-// Wrap a target URL for a user-supplied proxy. Supports a {url} placeholder, else appends ?url=.
-function applyProxy(proxy, u) {
-  return /\{url\}/.test(proxy)
-    ? proxy.replace(/\{url\}/g, encodeURIComponent(u))
-    : proxy + (proxy.includes("?") ? "&" : "?") + "url=" + encodeURIComponent(u);
-}
-function corsFetch(url, { signal, timeout = 9000, proxy = "" } = {}) {
-  const routes = [(u) => u];                              // direct first — CORS-enabled statewide services (FL/TX/TN) succeed instantly
-  if (proxy) routes.push((u) => applyProxy(proxy, u));    // user's proxy — for non-CORS servers (NC + county fallbacks)
-  routes.push((u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`);
-  routes.push((u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`);
-  return (async () => {
-    let lastErr;
-    for (const wrap of routes) {
-      if (signal && signal.aborted) throw new Error("aborted");
-      try {
-        const res = await fetch(wrap(url), { signal: signal || AbortSignal.timeout(timeout) });
-        if (res.ok) return res;
-        lastErr = new Error("HTTP " + res.status);
-      } catch (e) {
-        lastErr = e;
-        if (signal && signal.aborted) throw e;   // caller cancelled (stale request)
-      }
+function DelinquencyHubTab({ data, update, onGoImport }) {
+  const [boxId, setBoxId] = useState(data.buyboxes[0]?.id || "");
+  const [manualCounty, setManualCounty] = useState("");
+  const [manualState, setManualState] = useState("");
+  const [extra, setExtra] = useState([]);              // manually added {county, state}
+  const [busy, setBusy] = useState({});                // key -> true while researching
+  const [errors, setErrors] = useState({});            // key -> message
+  const [runningAll, setRunningAll] = useState(false);
+
+  const box = data.buyboxes.find(b => b.id === boxId);
+  const cache = data.delinq || {};
+  const counties = [
+    ...(box ? splitList(box.counties).map(c => ({ county: c, state: box.state || "" })) : []),
+    ...extra,
+  ].filter((c, i, arr) => arr.findIndex(x => delinqKey(x.county, x.state) === delinqKey(c.county, c.state)) === i);
+
+  const runOne = async (c) => {
+    const key = delinqKey(c.county, c.state);
+    setBusy(p => ({ ...p, [key]: true }));
+    setErrors(p => ({ ...p, [key]: "" }));
+    try {
+      const result = await researchCounty(c.county, c.state);
+      result.researchedAt = new Date().toISOString().slice(0, 10);
+      update({ ...data, delinq: { ...(data.delinq || {}), [key]: result } });
+    } catch (e) {
+      setErrors(p => ({ ...p, [key]: "Research failed — hit Research again in a few seconds." }));
+    } finally {
+      setBusy(p => ({ ...p, [key]: false }));
     }
-    throw lastErr || new Error("all CORS routes failed");
-  })();
+  };
+
+  const runAll = async () => {
+    setRunningAll(true);
+    for (const c of counties) {
+      if (!cache[delinqKey(c.county, c.state)]) await runOne(c);
+    }
+    setRunningAll(false);
+  };
+
+  const addManual = () => {
+    if (!manualCounty.trim()) return;
+    setExtra([...extra, { county: manualCounty.trim(), state: (manualState || box?.state || "").trim() }]);
+    setManualCounty("");
+  };
+
+  const fmtChip = (label, color) => (
+    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase", padding: "3px 9px", borderRadius: 99, background: color + "22", color, border: `1px solid ${color}` }}>{label}</span>
+  );
+
+  return (
+    <div>
+      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Delinquency hub</div>
+      <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Multi-county tax-delinquency recon. Live research finds each county's list, how to get it, and the next tax sale — then pull the list, filter to vacant land, and feed your Pipeline.</div>
+
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          <Field label="Buy box (loads its counties)">
+            <select className="lc-input" value={boxId} onChange={e => setBoxId(e.target.value)}>
+              <option value="">— none —</option>
+              {data.buyboxes.map(b => <option key={b.id} value={b.id}>{b.builder || "Unnamed"} — {splitList(b.counties).join(", ") || "no counties"}</option>)}
+            </select>
+          </Field>
+          <Field label="Add a county manually">
+            <div style={{ display: "flex", gap: 6 }}>
+              <input className="lc-input" value={manualCounty} onChange={e => setManualCounty(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addManual(); }} placeholder="County" />
+              <input className="lc-input" style={{ maxWidth: 70 }} value={manualState} onChange={e => setManualState(e.target.value)} placeholder="ST" />
+              <Btn small onClick={addManual}>+</Btn>
+            </div>
+          </Field>
+        </div>
+        {counties.length > 0 && (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+            <Btn onClick={runAll}>{runningAll ? "Researching all counties…" : `⚡ Research all ${counties.length} counties`}</Btn>
+            <span style={{ fontSize: 12, color: C.faint }}>~20–30 sec per county · results are saved, so you only pay that cost once per county</span>
+          </div>
+        )}
+      </div>
+
+      {counties.length === 0 && (
+        <div style={{ border: `2px dashed ${C.line}`, borderRadius: 8, padding: 40, textAlign: "center", color: C.faint, fontSize: 14 }}>
+          Pick a buy box with counties, or add a county manually to start the recon.
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: 12 }}>
+        {counties.map(c => {
+          const key = delinqKey(c.county, c.state);
+          const r = cache[key];
+          const isBusy = !!busy[key];
+          const err = errors[key];
+          return (
+            <div key={key} style={{ background: C.panel, border: `1px solid ${C.line}`, borderLeft: `5px solid ${r ? C.green : C.line}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <div className="lc-display" style={{ fontSize: 17, fontWeight: 800, textTransform: "uppercase" }}>{c.county} County{c.state ? `, ${c.state}` : ""}</div>
+                  {r && <div className="lc-mono" style={{ fontSize: 11, color: C.faint }}>researched {r.researchedAt}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {r && fmtChip(r.listFormat || "Unknown", r.requestRequired ? C.amber : C.green)}
+                  {r && r.saleType && r.saleType !== "unknown" && fmtChip(r.saleType, C.blue)}
+                  <Btn small kind={r ? "ghost" : "primary"} onClick={() => runOne(c)}>{isBusy ? "Researching…" : r ? "↻ Refresh" : "🔎 Research"}</Btn>
+                </div>
+              </div>
+
+              {isBusy && <div style={{ fontSize: 12.5, color: C.faint, marginTop: 10 }}>Searching the county tax collector, list format, and sale calendar…</div>}
+              {err && <div style={{ fontSize: 12.5, color: C.red, marginTop: 10 }}>{err}</div>}
+
+              {!r && !isBusy && (
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+                  <a className="lc-link" href={`https://www.google.com/search?q=${encodeURIComponent(`${c.county} county ${c.state} delinquent tax list real property`)}`} target="_blank" rel="noreferrer">↗ Quick search: delinquent list</a>
+                  <a className="lc-link" href={`https://www.google.com/search?q=${encodeURIComponent(`${c.county} county ${c.state} tax deed sale upcoming`)}`} target="_blank" rel="noreferrer">↗ Quick search: tax sales</a>
+                </div>
+              )}
+
+              {r && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 10 }}>
+                    <div><div className="lc-label">How to get the list</div><div style={{ fontSize: 13, lineHeight: 1.55 }}>{r.howToGet}</div></div>
+                    <div>
+                      <div className="lc-label">Cost</div><div style={{ fontSize: 13 }}>{r.cost || "—"}</div>
+                      <div className="lc-label" style={{ marginTop: 8 }}>Next sale</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: r.nextSaleDate && !/not announced|unknown/i.test(r.nextSaleDate) ? C.orangeDark : C.ink }}>{r.nextSaleDate || "—"}{r.salePlatform ? ` · ${r.salePlatform}` : ""}</div>
+                    </div>
+                  </div>
+                  {r.links && r.links.length > 0 && (
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+                      {r.links.map((l, i) => <a key={i} className="lc-link" href={l.url} target="_blank" rel="noreferrer">↗ {l.name}</a>)}
+                    </div>
+                  )}
+                  {r.tip && <div style={{ fontSize: 12.5, color: C.green, fontWeight: 600, marginBottom: 10 }}>💡 {r.tip}</div>}
+                  <div style={{ background: "#FAFBF7", border: `1px dashed ${C.line}`, borderRadius: 6, padding: 10, fontSize: 12.5, lineHeight: 1.6 }}>
+                    <strong>Work the list:</strong> download it → in PropStream/Regrid (or the spreadsheet itself) filter to <em>vacant land</em> + out-of-state owners + owned 5–10+ yrs → skip trace → then
+                    <button type="button" onClick={onGoImport} style={{ border: "none", background: "none", color: C.blue, fontWeight: 700, cursor: "pointer", fontSize: 12.5, padding: "0 4px", textDecoration: "underline" }}>import the CSV into your Pipeline →</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {counties.length > 0 && (
+        <div style={{ fontSize: 11.5, color: C.faint, marginTop: 12, textAlign: "center" }}>
+          AI web research — county sites change often, so verify links before relying on a sale date. Owners on these lists are often in hardship; lead with respect and real solutions.
+        </div>
+      )}
+    </div>
+  );
 }
 
-// Query ArcGIS parcel at a point
-async function queryArcGISParcel(serviceUrl, lat, lng, proxy = "") {
-  try {
-    const qs = new URLSearchParams({
-      geometry: `${lng},${lat}`, geometryType: "esriGeometryPoint",
-      spatialRel: "esriSpatialRelIntersects", outFields: "*",
-      returnGeometry: "true", inSR: "4326", outSR: "4326", f: "geojson",
-    });
-    const res = await corsFetch(`${serviceUrl}/query?${qs}`, { timeout: 9000, proxy });
-    const json = await res.json();
-    return json.features?.[0] || null;
-  } catch (_) { return null; }
-}
+/* ============================================================
+   COMMAND CENTER — home page, automation, radar situation map
+   Aesthetic: land-survey mission control. Phosphor HUD on a
+   topographic field. Signature element: live radar sweep with
+   hot-spot blips drawn from your armed counties + matched leads.
+   ============================================================ */
+const CC = {
+  void: "#0A0F0D", abyss: "#070B0A", moss: "#0E1A14", mossLit: "#12241B",
+  edge: "#1E3A2A", edgeLit: "#2A5740",
+  phosphor: "#4ADE9E", phosphorDim: "#3C8C68",
+  signal: "#FF6B2C", signalDim: "#B8480F",
+  cyan: "#46C7F2", amber: "#F5B544",
+  stake: "#D6E2D8", stakeDim: "#7E948A",
+};
 
-// Nominatim reverse geocode (zoom 18 ≈ house-number level for full street address)
-async function reverseGeocode(lat, lng, zoom = 18) {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&zoom=${zoom}&addressdetails=1&format=json`,
-      { headers: { "Accept-Language": "en" }, signal: AbortSignal.timeout(6000) }
-    );
-    return await res.json();
-  } catch (_) { return null; }
-}
+const CC_CSS = `
+.cc-header { position: relative; background: linear-gradient(180deg, ${CC.abyss} 0%, ${CC.void} 100%); border-bottom: 1px solid ${CC.edge}; overflow: hidden; }
+.cc-contour { position: absolute; inset: 0; opacity: .5; pointer-events: none;
+  background-image:
+    repeating-radial-gradient(circle at 18% 140%, transparent 0 22px, rgba(74,222,158,.05) 22px 23px),
+    repeating-radial-gradient(circle at 85% -40%, transparent 0 26px, rgba(70,199,242,.045) 26px 27px); }
+.cc-dot { width: 9px; height: 9px; border-radius: 50%; background: ${CC.phosphor}; box-shadow: 0 0 0 0 ${CC.phosphor}; animation: cc-pulse 2.4s infinite; flex-shrink: 0; }
+@keyframes cc-pulse { 0% { box-shadow: 0 0 0 0 rgba(74,222,158,.6);} 70% { box-shadow: 0 0 0 8px rgba(74,222,158,0);} 100% { box-shadow: 0 0 0 0 rgba(74,222,158,0);} }
+.cc-chip { font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; letter-spacing:.08em; padding:4px 11px; border-radius:3px; border:1px solid; cursor:pointer; }
+.cc-tab { padding: 9px 18px; border:1px solid transparent; border-bottom:none; cursor:pointer; font-weight:800; font-size:12.5px; letter-spacing:.1em; text-transform:uppercase;
+  background:transparent; color:${CC.stakeDim}; border-radius:6px 6px 0 0; transition: color .15s, background .15s; }
+.cc-tab:hover { color:${CC.stake}; background:${CC.moss}; }
+.cc-tab-on { background:${CC.void}; color:${CC.phosphor}; border-color:${CC.edge}; box-shadow: inset 0 2px 0 ${CC.phosphor}; }
+.cc-wrap { background: radial-gradient(ellipse at 50% -10%, ${CC.mossLit} 0%, ${CC.void} 55%, ${CC.abyss} 100%); border:1px solid ${CC.edge}; border-radius:14px; padding:0; overflow:hidden; color:${CC.stake}; }
+.cc-card { background:${CC.moss}; border:1px solid ${CC.edge}; border-radius:10px; padding:16px; }
+.cc-card:hover { border-color:${CC.edgeLit}; }
+.cc-eyebrow { font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; letter-spacing:.2em; text-transform:uppercase; color:${CC.phosphorDim}; }
+.cc-kpi { font-family:'Saira Condensed',sans-serif; font-size:38px; font-weight:800; line-height:.9; color:${CC.stake}; }
+.cc-launch { display:flex; flex-direction:column; gap:7px; align-items:flex-start; text-align:left; background:${CC.moss}; border:1px solid ${CC.edge}; border-radius:10px; padding:14px; cursor:pointer; transition: transform .12s, border-color .12s, background .12s; width:100%; }
+.cc-launch:hover { transform: translateY(-2px); border-color:${CC.phosphor}; background:${CC.mossLit}; }
+.cc-radar-sweep { transform-origin: 50% 50%; animation: cc-spin 4s linear infinite; }
+@keyframes cc-spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+.cc-blip { animation: cc-blip 2s ease-out infinite; }
+@keyframes cc-blip { 0%,100% { opacity:.35;} 50% { opacity:1;} }
+.cc-actionrow { display:flex; align-items:center; gap:12px; padding:11px 13px; border:1px solid ${CC.edge}; border-radius:9px; background:${CC.moss}; transition: border-color .12s; }
+.cc-actionrow:hover { border-color:${CC.edgeLit}; }
+@media (prefers-reduced-motion: reduce) { .cc-dot,.cc-radar-sweep,.cc-blip { animation: none !important; } }
+`;
 
-// Build a full street address string from a Nominatim reverse-geocode result
-function buildAddress(geo) {
-  const a = (geo && geo.address) || {};
-  const line1 = [a.house_number, a.road].filter(Boolean).join(" ");
-  const cityish = a.city || a.town || a.village || a.hamlet || a.municipality || a.county;
-  const region = [a.state, a.postcode].filter(Boolean).join(" ");
-  const full = [line1, cityish, region].filter(Boolean).join(", ");
-  return full || (geo && geo.display_name) || "";
+/* ---- automation helpers ---- */
+function daysSinceISO(d) {
+  if (!d) return null;
+  const then = new Date(d + "T00:00:00"); if (isNaN(then)) return null;
+  return Math.floor((Date.now() - then.getTime()) / 86400000);
 }
-
-// Nearest known county centroid within a state — picks which parcel service to query as you pan
-function nearestCounty(st, lat, lng) {
-  const arr = GIS_COUNTIES[st];
-  if (!arr) return null;
-  let best = null, bd = Infinity;
-  for (const name in arr) {
-    const d = arr[name];
-    const dist = (d.lat - lat) ** 2 + (d.lng - lng) ** 2;
-    if (dist < bd) { bd = dist; best = { name, lat: d.lat, lng: d.lng, slug: d.slug }; }
+/* Lightweight auto-match: scores a list lead on the data it reliably has
+   (location, size, price) against a buy box. No diligence fields needed. */
+function quickMatch(lead, b) {
+  let applic = 0, hit = 0, locMatch = false;
+  const zips = splitList(b.zips), counties = splitList(b.counties).map(x => x.toLowerCase());
+  if (zips.length || counties.length) {
+    applic++;
+    const z = (lead.zip || "").trim(), co = (lead.county || "").trim().toLowerCase();
+    if ((zips.length && zips.includes(z)) || (counties.length && counties.includes(co))) { hit++; locMatch = true; }
+  }
+  const ac = parseFloat(lead.acres);
+  if (!isNaN(ac) && (b.lotMin || b.lotMax)) {
+    applic++;
+    const mn = parseFloat(b.lotMin) || 0, mx = parseFloat(b.lotMax) || Infinity;
+    if (ac >= mn && ac <= mx) hit++;
+  }
+  const price = parseFloat(lead.price);
+  if (!isNaN(price) && b.maxPrice) { applic++; if (price <= parseFloat(b.maxPrice)) hit++; }
+  const score = applic ? Math.round((hit / applic) * 100) : 0;
+  return { score, locMatch, applic };
+}
+function bestMatch(lead, buyboxes) {
+  if (!buyboxes || !buyboxes.length) return null;
+  let best = null;
+  for (const b of buyboxes) {
+    const m = quickMatch(lead, b);
+    if (m.applic === 0) continue;
+    const rank = m.score + (m.locMatch ? 1000 : 0);
+    if (!best || rank > best.rank) best = { rank, score: m.score, locMatch: m.locMatch, builder: b.builder || "Unnamed", boxId: b.id };
   }
   return best;
 }
+function matchColor(score) { return score >= 80 ? CC.phosphor : score >= 55 ? CC.amber : CC.stakeDim; }
 
-// Query every parcel intersecting the current map bounds (for showing all lot outlines).
-// Speed levers (fetch semantics untouched — signal-only abort, NO kill-timer):
-//  · maxAllowableOffset ~1m + 6-decimal coords: map-resolution outlines instead of
-//    survey-grade -> 60–80% smaller downloads. Self-heals: if a server errors on those
-//    params, the query retries plain rather than rendering nothing.
-//  · `split` quarters the viewport into 4 PARALLEL queries: each smaller query returns
-//    faster and the combined record budget covers dense plats (Lehigh Acres-type areas).
-async function queryArcGISParcelsInBounds(serviceUrl, bounds, signal, proxy = "", split = false) {
-  const run = async (w, s, e, n) => {
-    const query = async (slim) => {
+function nextActions(leads) {
+  const dead = new Set(["Closed", "Dead", "Assigned"]);
+  const rows = [];
+  for (const l of leads) {
+    if (dead.has(l.status)) continue;
+    const touches = [l.texted, l.called, l.mailed].map(daysSinceISO).filter(x => x !== null);
+    const last = touches.length ? Math.min(...touches) : null;
+    let urgency, action;
+    if (last === null) { urgency = 1000; action = "Start outreach — never contacted"; }
+    else if (last >= 5) { urgency = last; action = `Follow up — ${last}d since last touch`; }
+    else continue;
+    rows.push({ lead: l, urgency, action });
+  }
+  return rows.sort((a, b) => b.urgency - a.urgency).slice(0, 6);
+}
+
+function CommandCenterTab({ data, onNavigate, storageOk, onOpenBackup }) {
+  const leads = data.leads || [], boxes = data.buyboxes || [];
+  const matched = useMemo(() => leads.map(l => ({ l, m: bestMatch(l, boxes) })).filter(x => x.m), [leads, boxes]);
+  const hot = matched.filter(x => x.m.locMatch && x.m.score >= 70).sort((a, b) => b.m.score - a.m.score);
+  const actions = useMemo(() => nextActions(leads), [leads]);
+  const delinq = data.delinq || {};
+  const hotCounties = Object.values(delinq).filter(r => r && r.nextSaleDate && !/not announced|unknown/i.test(r.nextSaleDate));
+
+  const funnel = ["New", "Contacted", "Negotiating", "Under contract", "Closed"].map(st => ({
+    st, n: leads.filter(l => l.status === st).length,
+  }));
+  const maxF = Math.max(1, ...funnel.map(f => f.n));
+
+  // radar blips from armed counties (buy boxes) + hot leads
+  const armedCounties = [...new Set(boxes.flatMap(b => splitList(b.counties)))];
+  const blips = armedCounties.slice(0, 9).map((name, i) => {
+    let h = 0; for (let k = 0; k < name.length; k++) h = (h * 31 + name.charCodeAt(k)) % 997;
+    const ang = (h % 360) * Math.PI / 180, rad = 26 + (h % 60);
+    return { name, x: 100 + Math.cos(ang) * rad, y: 100 + Math.sin(ang) * rad, hot: hot.some(x => (x.l.county || "").toLowerCase() === name.toLowerCase()) };
+  });
+
+  const empty = boxes.length === 0 && leads.length === 0;
+  const fmtK = (n) => n >= 1000 ? (n / 1000).toFixed(n % 1000 ? 1 : 0) + "k" : n;
+
+  const launches = [
+    ["scout", "◎", "Market Scout", "Score any county's builder demand, live"],
+    ["boxes", "▢", "Buy Boxes", "Define what your builders pay cash for"],
+    ["find", "⛏", "Find Deals", "Pre-targeted on/off-market search routes"],
+    ["delinq", "⚑", "Delinquency Hub", "Locate distressed lists across counties"],
+    ["match", "◈", "Match a Parcel", "Score a lot against every buy box"],
+    ["pricing", "$", "Pricing Calc", "CMV → offer → MAO → spread"],
+    ["calls", "☎", "Call Scripts", "Live scripts for all 4 sides of a deal"],
+    ["pipeline", "≡", "Pipeline", "Owners, outreach, and auto-match scores"],
+  ];
+
+  return (
+    <div className="cc-wrap">
+      {/* Hero: radar situation map */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 0, borderBottom: `1px solid ${CC.edge}` }}>
+        <div style={{ padding: "26px 26px 22px" }}>
+          <div className="cc-eyebrow">Operation Status · {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</div>
+          <div className="lc-display" style={{ fontSize: 34, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: CC.stake, lineHeight: 1, margin: "8px 0 4px" }}>
+            Situation <span style={{ color: CC.phosphor }}>Map</span>
+          </div>
+          <div style={{ fontSize: 13, color: CC.stakeDim, maxWidth: 440, lineHeight: 1.5 }}>
+            {empty ? "No active operations yet. Arm your first buy box and Land Command starts hunting." :
+              `${armedCounties.length} counties armed · ${hot.length} hot lead${hot.length === 1 ? "" : "s"} flagged · ${actions.length} action${actions.length === 1 ? "" : "s"} waiting. The system scored everything automatically — your move.`}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
+            <button className="cc-launch" style={{ width: "auto", flexDirection: "row", alignItems: "center", gap: 8, borderColor: CC.signal }} onClick={() => onNavigate(empty ? "boxes" : "pipeline")}>
+              <span style={{ color: CC.signal, fontWeight: 800 }}>{empty ? "▢ Arm a buy box" : "≡ Work the pipeline"}</span>
+            </button>
+            <button className="cc-launch" style={{ width: "auto", flexDirection: "row", alignItems: "center", gap: 8 }} onClick={() => onNavigate("scout")}>
+              <span style={{ color: CC.phosphor, fontWeight: 800 }}>◎ Scout a market</span>
+            </button>
+          </div>
+        </div>
+        {/* Radar */}
+        <div style={{ width: 230, minWidth: 230, display: "flex", alignItems: "center", justifyContent: "center", background: CC.abyss, borderLeft: `1px solid ${CC.edge}` }}>
+          <svg width="200" height="200" viewBox="0 0 200 200">
+            <defs>
+              <radialGradient id="ccGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor={CC.phosphor} stopOpacity="0.18" />
+                <stop offset="100%" stopColor={CC.phosphor} stopOpacity="0" />
+              </radialGradient>
+              <linearGradient id="ccSweep" x1="50%" y1="50%" x2="100%" y2="50%">
+                <stop offset="0%" stopColor={CC.phosphor} stopOpacity="0.55" />
+                <stop offset="100%" stopColor={CC.phosphor} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <circle cx="100" cy="100" r="92" fill="url(#ccGlow)" />
+            {[30, 56, 82].map(r => <circle key={r} cx="100" cy="100" r={r} fill="none" stroke={CC.edge} strokeWidth="1" />)}
+            <line x1="8" y1="100" x2="192" y2="100" stroke={CC.edge} strokeWidth="1" />
+            <line x1="100" y1="8" x2="100" y2="192" stroke={CC.edge} strokeWidth="1" />
+            <g className="cc-radar-sweep">
+              <path d="M100 100 L192 100 A92 92 0 0 1 150 180 Z" fill="url(#ccSweep)" />
+            </g>
+            {blips.map((b, i) => (
+              <g key={i} className="cc-blip" style={{ animationDelay: `${i * 0.3}s` }}>
+                <circle cx={b.x} cy={b.y} r={b.hot ? 4.5 : 3} fill={b.hot ? CC.signal : CC.phosphor} />
+                {b.hot && <circle cx={b.x} cy={b.y} r="8" fill="none" stroke={CC.signal} strokeWidth="1" opacity="0.5" />}
+              </g>
+            ))}
+            <circle cx="100" cy="100" r="3" fill={CC.stake} />
+          </svg>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 1, background: CC.edge, borderBottom: `1px solid ${CC.edge}` }}>
+        {[
+          ["Buy boxes", boxes.length, CC.stake],
+          ["Total leads", fmtK(leads.length), CC.stake],
+          ["Hot leads", hot.length, CC.signal],
+          ["Counties armed", armedCounties.length, CC.phosphor],
+          ["In negotiation+", leads.filter(l => ["Negotiating", "Under contract"].includes(l.status)).length, CC.cyan],
+          ["Closed", leads.filter(l => l.status === "Closed").length, CC.phosphor],
+        ].map(([label, val, color], i) => (
+          <div key={i} style={{ background: CC.void, padding: "14px 16px" }}>
+            <div className="cc-kpi" style={{ color }}>{val}</div>
+            <div className="cc-eyebrow" style={{ marginTop: 4 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: 14 }}>
+        {/* Today's call list */}
+        <div className="cc-card">
+          <div className="cc-eyebrow" style={{ color: CC.signal }}>▶ Today's call list — auto-prioritized</div>
+          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+            {actions.length === 0 && <div style={{ fontSize: 13, color: CC.stakeDim }}>{leads.length ? "All caught up — no follow-ups due. Add leads or pull a delinquency list." : "No leads yet. The pipeline fills from CSV imports and the Delinquency Hub."}</div>}
+            {actions.map(({ lead, action }, i) => {
+              const m = bestMatch(lead, boxes);
+              return (
+                <div key={i} className="cc-actionrow">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 700, color: CC.stake, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.owner || "Unknown owner"}{lead.county ? ` · ${lead.county}` : ""}</div>
+                    <div style={{ fontSize: 11.5, color: CC.signal }}>{action}</div>
+                  </div>
+                  {m && <span className="lc-mono" style={{ fontSize: 11, fontWeight: 700, color: matchColor(m.score) }}>{m.score}%</span>}
+                </div>
+              );
+            })}
+          </div>
+          {actions.length > 0 && <button className="cc-launch" style={{ marginTop: 12, width: "auto", flexDirection: "row" }} onClick={() => onNavigate("pipeline")}><span style={{ color: CC.phosphor, fontWeight: 700, fontSize: 13 }}>Open pipeline →</span></button>}
+        </div>
+
+        {/* Pipeline funnel */}
+        <div className="cc-card">
+          <div className="cc-eyebrow">◢ Pipeline funnel</div>
+          <div style={{ display: "grid", gap: 9, marginTop: 12 }}>
+            {funnel.map(f => (
+              <div key={f.st}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+                  <span style={{ color: CC.stakeDim }}>{f.st}</span>
+                  <span className="lc-mono" style={{ color: CC.stake, fontWeight: 700 }}>{f.n}</span>
+                </div>
+                <div style={{ height: 6, background: CC.abyss, borderRadius: 99, overflow: "hidden" }}>
+                  <div style={{ width: `${(f.n / maxF) * 100}%`, height: "100%", background: f.st === "Closed" ? CC.phosphor : f.st === "Under contract" ? CC.cyan : CC.signal, borderRadius: 99 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Top matched leads */}
+        <div className="cc-card">
+          <div className="cc-eyebrow" style={{ color: CC.phosphor }}>◈ Top auto-matched leads</div>
+          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+            {hot.length === 0 && <div style={{ fontSize: 13, color: CC.stakeDim }}>No location-matched leads yet. Every lead you add is scored against all buy boxes automatically — strong matches surface here.</div>}
+            {hot.slice(0, 6).map(({ l, m }, i) => (
+              <div key={i} className="cc-actionrow">
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: CC.stake, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.owner || l.apn || "Unknown"}{l.acres ? ` · ${l.acres}ac` : ""}</div>
+                  <div style={{ fontSize: 11.5, color: CC.stakeDim }}>fits {m.builder}</div>
+                </div>
+                <span className="lc-mono" style={{ fontSize: 14, fontWeight: 700, color: matchColor(m.score) }}>{m.score}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Hot counties / tax sale clock */}
+        <div className="cc-card">
+          <div className="cc-eyebrow" style={{ color: CC.amber }}>⚑ Tax-sale clock</div>
+          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+            {hotCounties.length === 0 && <div style={{ fontSize: 13, color: CC.stakeDim }}>Research counties in the Delinquency Hub and upcoming tax-sale dates appear here — your sharpest outreach windows.</div>}
+            {hotCounties.slice(0, 5).map((r, i) => (
+              <div key={i} className="cc-actionrow">
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: CC.stake }}>{r.county} County{r.state ? `, ${r.state}` : ""}</div>
+                  <div style={{ fontSize: 11.5, color: CC.amber }}>{r.saleType !== "unknown" ? r.saleType + " · " : ""}{r.nextSaleDate}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {hotCounties.length > 0 && <button className="cc-launch" style={{ marginTop: 12, width: "auto", flexDirection: "row" }} onClick={() => onNavigate("delinq")}><span style={{ color: CC.amber, fontWeight: 700, fontSize: 13 }}>Open Delinquency Hub →</span></button>}
+        </div>
+      </div>
+
+      {/* Quick launch grid */}
+      <div style={{ padding: "0 18px 8px" }}>
+        <div className="cc-eyebrow" style={{ marginBottom: 10 }}>⬡ Launch console</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10 }}>
+          {launches.map(([id, icon, name, desc]) => (
+            <button key={id} className="cc-launch" onClick={() => onNavigate(id)}>
+              <span style={{ fontSize: 18, color: CC.phosphor }}>{icon}</span>
+              <span className="lc-display" style={{ fontSize: 15, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: CC.stake }}>{name}</span>
+              <span style={{ fontSize: 11.5, color: CC.stakeDim, lineHeight: 1.4 }}>{desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Save status footer */}
+      <div style={{ padding: "14px 18px 18px", borderTop: `1px solid ${CC.edge}`, marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span className="lc-mono" style={{ fontSize: 11, color: storageOk === false ? CC.amber : CC.phosphorDim }}>
+          {storageOk === false ? "⚠ Auto-save unavailable here — back up before you leave." : storageOk ? "● Auto-save active. Your data persists between sessions." : "Checking storage…"}
+        </span>
+        <button className="cc-chip" style={{ borderColor: CC.edge, color: CC.stakeDim, background: "transparent" }} onClick={onOpenBackup}>⛁ Backup / Restore</button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   MARKET RADAR — Florida builder-demand radar on a live map.
+   Hotspots are REAL data: single-family building permits per
+   county (US Census Building Permits Survey — 2024 + 2025
+   annual, 2026 YTD through May). Score blends volume with
+   momentum (2026 pace vs 2025, and 2025 vs 2024).
+   Ground truth on demand: live land-sale scan straight from
+   the FL statewide cadastral (SALE_PRC1/SALE_YR1), no login.
+   If map tiles are blocked (native sandbox) the radar keeps
+   working on a dark grid with the embedded FL outline.
+   ============================================================ */
+const FL_CADASTRAL = "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0";
+const FL_VACANT_UC = ["000", "00", "010", "10", "040", "40", "070", "70", "099", "99"];
+const PARCEL_ZOOM = 15; // lot lines + owner cards at this zoom and deeper
+const SAT_ZOOM = 13;    // auto-switch to satellite at this zoom (ground-level recon)
+
+// FL DOR land-use codes (the ones a land wholesaler actually meets)
+const DOR_LABELS = {
+  "0": "Vacant residential", "1": "Single family", "2": "Mobile home", "3": "Multi-family",
+  "4": "Condo", "8": "Multi-family <10", "10": "Vacant commercial", "40": "Vacant industrial",
+  "50": "Cropland", "60": "Grazing land", "66": "Orchard/grove", "70": "Vacant institutional",
+  "99": "Acreage — non-agricultural",
+};
+function dorLabel(uc) {
+  const raw = String(uc == null ? "" : uc).trim();
+  if (!raw) return "";
+  const key = String(parseInt(raw, 10));
+  return DOR_LABELS[key] || `Use code ${raw}`;
+}
+
+// Point-in-polygon (ray cast) for picking the parcel under a geocoded address
+function pointInRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function featureContains(feat, lng, lat) {
+  const g = feat && feat.geometry; if (!g) return false;
+  const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+  return polys.some((rings) => rings.length && pointInRing(lng, lat, rings[0]) && rings.slice(1).every((h) => !pointInRing(lng, lat, h)));
+}
+function featureRoughCenter(feat) {
+  const g = feat && feat.geometry; if (!g) return null;
+  const ring = g.type === "Polygon" ? g.coordinates[0] : g.type === "MultiPolygon" ? g.coordinates[0][0] : null;
+  if (!ring || !ring.length) return null;
+  let sx = 0, sy = 0;
+  ring.forEach((pt) => { sx += pt[0]; sy += pt[1]; });
+  return [sx / ring.length, sy / ring.length];
+}
+
+// Does this search look like a specific lot (APN or street address) vs a market?
+function looksLikeLotQuery(s) {
+  const t = String(s || "").trim();
+  if (!t) return false;
+  if (/^\d+\s+[A-Za-z]/.test(t)) return true; // "5421 Kemkerry Rd" — street address
+  if (/\b(rd|road|st|street|ave|avenue|dr|drive|ln|lane|blvd|hwy|way|ct|court|cir|circle|ter|terrace|trl|trail|pkwy|loop)\b/i.test(t)) return true;
+  const digits = (t.match(/\d/g) || []).length;
+  return digits >= 6 && !/county/i.test(t); // APN-ish: lots of digits, not a county name
+}
+
+// Nearest county centroid → county tag for leads (approx is fine; leads are editable)
+function nearestFLCounty(lat, lng) {
+  let best = null, bd = Infinity;
+  RADAR_PERMITS.forEach((c) => {
+    if (c.st !== "FL") return;
+    const d = (c.lat - lat) * (c.lat - lat) + (c.lng - lng) * (c.lng - lng);
+    if (d < bd) { bd = d; best = c; }
+  });
+  return best ? best.n : "";
+}
+
+// st = state · f = county FIPS suffix · u24/u25 = SF permits full year · u26 = Jan–May 2026 YTD
+const RADAR_PERMITS = [{"st":"TX","f":"201","n":"Harris","lat":29.8573,"lng":-95.393,"u24":20069,"u25":16893,"u26":7479},{"st":"TX","f":"339","n":"Montgomery","lat":30.2988,"lng":-95.5029,"u24":11599,"u25":11585,"u26":4982},{"st":"TX","f":"085","n":"Collin","lat":33.1945,"lng":-96.5794,"u24":15047,"u25":11186,"u26":4216},{"st":"FL","f":"071","n":"Lee","lat":26.5633,"lng":-81.9842,"u24":10554,"u25":9962,"u26":3034},{"st":"TX","f":"157","n":"Fort Bend","lat":29.5266,"lng":-95.771,"u24":11276,"u25":9520,"u26":4040},{"st":"TX","f":"439","n":"Tarrant","lat":32.7721,"lng":-97.2912,"u24":9458,"u25":8725,"u26":4154},{"st":"NC","f":"183","n":"Wake","lat":35.7898,"lng":-78.6506,"u24":9621,"u25":8399,"u26":3570},{"st":"FL","f":"081","n":"Manatee","lat":27.4756,"lng":-82.3931,"u24":5630,"u25":7011,"u26":2899},{"st":"FL","f":"105","n":"Polk","lat":27.9537,"lng":-81.6935,"u24":8514,"u25":6557,"u26":2930},{"st":"FL","f":"101","n":"Pasco","lat":28.3098,"lng":-82.511,"u24":5481,"u25":6313,"u26":2705},{"st":"TX","f":"121","n":"Denton","lat":33.2051,"lng":-97.1211,"u24":7400,"u25":6095,"u26":2921},{"st":"FL","f":"083","n":"Marion","lat":29.2028,"lng":-82.0431,"u24":6409,"u25":5420,"u26":2761},{"st":"FL","f":"097","n":"Osceola","lat":28.059,"lng":-81.1393,"u24":5643,"u25":5085,"u26":1419},{"st":"TX","f":"453","n":"Travis","lat":30.2395,"lng":-97.6913,"u24":4830,"u25":4946,"u26":2333},{"st":"TX","f":"113","n":"Dallas","lat":32.767,"lng":-96.7784,"u24":5516,"u25":4607,"u26":1918},{"st":"TX","f":"029","n":"Bexar","lat":29.4487,"lng":-98.5201,"u24":5774,"u25":4528,"u26":2200},{"st":"TX","f":"215","n":"Hidalgo","lat":26.3964,"lng":-98.181,"u24":4391,"u25":4527,"u26":1953},{"st":"NC","f":"019","n":"Brunswick","lat":34.0388,"lng":-78.2278,"u24":5118,"u25":4454,"u26":2161},{"st":"FL","f":"057","n":"Hillsborough","lat":27.8932,"lng":-82.38,"u24":4402,"u25":4295,"u26":1766},{"st":"FL","f":"115","n":"Sarasota","lat":27.2253,"lng":-82.4237,"u24":5259,"u25":4283,"u26":1684},{"st":"TX","f":"491","n":"Williamson","lat":30.6491,"lng":-97.6051,"u24":5994,"u25":4272,"u26":1890},{"st":"FL","f":"095","n":"Orange","lat":28.5144,"lng":-81.3233,"u24":4811,"u25":4219,"u26":1774},{"st":"FL","f":"069","n":"Lake","lat":28.7641,"lng":-81.7123,"u24":3956,"u25":3925,"u26":1691},{"st":"TX","f":"209","n":"Hays","lat":30.0612,"lng":-98.0293,"u24":3763,"u25":3756,"u26":1773},{"st":"NC","f":"119","n":"Mecklenburg","lat":35.2469,"lng":-80.8338,"u24":6496,"u25":3747,"u26":247},{"st":"FL","f":"031","n":"Duval","lat":30.3352,"lng":-81.6481,"u24":5138,"u25":3728,"u26":1630},{"st":"FL","f":"109","n":"St. Johns","lat":29.8905,"lng":-81.4,"u24":4915,"u25":3554,"u26":1231},{"st":"FL","f":"111","n":"St. Lucie","lat":27.3798,"lng":-80.4435,"u24":4570,"u25":3467,"u26":1320},{"st":"FL","f":"009","n":"Brevard","lat":28.2983,"lng":-80.7003,"u24":3888,"u25":3376,"u26":1411},{"st":"FL","f":"119","n":"Sumter","lat":28.7133,"lng":-82.0695,"u24":3537,"u25":3105,"u26":1635},{"st":"TX","f":"039","n":"Brazoria","lat":29.1678,"lng":-95.4346,"u24":3362,"u25":3007,"u26":1251},{"st":"TX","f":"139","n":"Ellis","lat":32.3469,"lng":-96.7969,"u24":2898,"u25":2980,"u26":1079},{"st":"NC","f":"067","n":"Forsyth","lat":36.1325,"lng":-80.257,"u24":2537,"u25":2863,"u26":1223},{"st":"NC","f":"063","n":"Durham","lat":36.0338,"lng":-78.8781,"u24":1912,"u25":2790,"u26":1403},{"st":"TN","f":"037","n":"Davidson","lat":36.1691,"lng":-86.7848,"u24":2712,"u25":2738,"u26":817},{"st":"NC","f":"101","n":"Johnston","lat":35.5134,"lng":-78.3673,"u24":2775,"u25":2633,"u26":1102},{"st":"FL","f":"015","n":"Charlotte","lat":26.9064,"lng":-82.0037,"u24":3583,"u25":2571,"u26":1374},{"st":"TN","f":"093","n":"Knox","lat":35.9927,"lng":-83.9377,"u24":2544,"u25":2566,"u26":1182},{"st":"FL","f":"099","n":"Palm Beach","lat":26.6491,"lng":-80.4484,"u24":2811,"u25":2549,"u26":1337},{"st":"TN","f":"149","n":"Rutherford","lat":35.8434,"lng":-86.4172,"u24":2997,"u25":2533,"u26":1170},{"st":"TX","f":"167","n":"Galveston","lat":29.2339,"lng":-94.8882,"u24":3258,"u25":2514,"u26":1178},{"st":"NC","f":"179","n":"Union","lat":34.9918,"lng":-80.5304,"u24":2167,"u25":2387,"u26":961},{"st":"FL","f":"086","n":"Miami-Dade","lat":25.616,"lng":-80.5037,"u24":1990,"u25":2167,"u26":960},{"st":"NC","f":"085","n":"Harnett","lat":35.3687,"lng":-78.8717,"u24":2068,"u25":2166,"u26":847},{"st":"NC","f":"071","n":"Gaston","lat":35.2928,"lng":-81.1774,"u24":1923,"u25":2153,"u26":858},{"st":"TX","f":"027","n":"Bell","lat":31.0427,"lng":-97.4813,"u24":2618,"u25":2107,"u26":999},{"st":"FL","f":"017","n":"Citrus","lat":28.8503,"lng":-82.5956,"u24":2415,"u25":2082,"u26":712},{"st":"FL","f":"127","n":"Volusia","lat":29.0578,"lng":-81.1618,"u24":2701,"u25":2073,"u26":779},{"st":"TX","f":"303","n":"Lubbock","lat":33.6115,"lng":-101.8199,"u24":1921,"u25":2036,"u26":901},{"st":"FL","f":"035","n":"Flagler","lat":29.4749,"lng":-81.2863,"u24":2384,"u25":1950,"u26":754},{"st":"FL","f":"021","n":"Collier","lat":26.1188,"lng":-81.401,"u24":2486,"u25":1945,"u26":880},{"st":"TX","f":"251","n":"Johnson","lat":32.3797,"lng":-97.3649,"u24":1948,"u25":1867,"u26":977},{"st":"FL","f":"113","n":"Santa Rosa","lat":30.6753,"lng":-87.0189,"u24":1851,"u25":1864,"u26":907},{"st":"TX","f":"141","n":"El Paso","lat":31.7665,"lng":-106.2415,"u24":1953,"u25":1813,"u26":800},{"st":"TX","f":"061","n":"Cameron","lat":26.1029,"lng":-97.479,"u24":1659,"u25":1797,"u26":761},{"st":"NC","f":"081","n":"Guilford","lat":36.0791,"lng":-79.7887,"u24":1440,"u25":1738,"u26":667},{"st":"FL","f":"053","n":"Hernando","lat":28.556,"lng":-82.526,"u24":2187,"u25":1733,"u26":720},{"st":"TX","f":"091","n":"Comal","lat":29.8124,"lng":-98.2581,"u24":2253,"u25":1726,"u26":812},{"st":"TN","f":"189","n":"Wilson","lat":36.1494,"lng":-86.2912,"u24":1905,"u25":1723,"u26":689},{"st":"TX","f":"041","n":"Brazos","lat":30.6567,"lng":-96.3024,"u24":1378,"u25":1687,"u26":717},{"st":"NC","f":"001","n":"Alamance","lat":36.044,"lng":-79.4006,"u24":1999,"u25":1674,"u26":749},{"st":"FL","f":"005","n":"Bay","lat":30.1591,"lng":-85.5344,"u24":1886,"u25":1667,"u26":703},{"st":"TN","f":"125","n":"Montgomery","lat":36.5004,"lng":-87.3809,"u24":1842,"u25":1635,"u26":783},{"st":"TX","f":"397","n":"Rockwall","lat":32.8999,"lng":-96.412,"u24":1810,"u25":1587,"u26":741},{"st":"TN","f":"165","n":"Sumner","lat":36.4724,"lng":-86.4584,"u24":1608,"u25":1568,"u26":593},{"st":"TX","f":"021","n":"Bastrop","lat":30.1008,"lng":-97.3106,"u24":1419,"u25":1546,"u26":600},{"st":"TX","f":"187","n":"Guadalupe","lat":29.5827,"lng":-97.949,"u24":1907,"u25":1544,"u26":674},{"st":"TX","f":"355","n":"Nueces","lat":27.74,"lng":-97.5162,"u24":1336,"u25":1489,"u26":582},{"st":"NC","f":"097","n":"Iredell","lat":35.8063,"lng":-80.8745,"u24":1827,"u25":1447,"u26":576},{"st":"FL","f":"131","n":"Walton","lat":30.5712,"lng":-86.1628,"u24":1549,"u25":1427,"u26":827},{"st":"TN","f":"065","n":"Hamilton","lat":35.1635,"lng":-85.2018,"u24":1540,"u25":1379,"u26":766},{"st":"FL","f":"033","n":"Escambia","lat":30.53,"lng":-87.3203,"u24":1463,"u25":1366,"u26":879},{"st":"NC","f":"025","n":"Cabarrus","lat":35.3883,"lng":-80.5527,"u24":1768,"u25":1358,"u26":684},{"st":"NC","f":"035","n":"Catawba","lat":35.6619,"lng":-81.2149,"u24":1651,"u25":1353,"u26":922},{"st":"FL","f":"103","n":"Pinellas","lat":27.9053,"lng":-82.7981,"u24":1184,"u25":1327,"u26":603},{"st":"NC","f":"133","n":"Onslow","lat":34.7631,"lng":-77.4995,"u24":1213,"u25":1318,"u26":638},{"st":"TN","f":"119","n":"Maury","lat":35.6157,"lng":-87.0778,"u24":1560,"u25":1318,"u26":635},{"st":"TX","f":"329","n":"Midland","lat":31.8143,"lng":-102.0025,"u24":1504,"u25":1317,"u26":304},{"st":"TN","f":"187","n":"Williamson","lat":35.8948,"lng":-86.8979,"u24":1357,"u25":1286,"u26":494},{"st":"FL","f":"019","n":"Clay","lat":29.9866,"lng":-81.865,"u24":1859,"u25":1240,"u26":594},{"st":"NC","f":"129","n":"New Hanover","lat":34.1834,"lng":-77.8642,"u24":1296,"u25":1208,"u26":502},{"st":"TX","f":"181","n":"Grayson","lat":33.6245,"lng":-96.6758,"u24":1492,"u25":1184,"u26":498},{"st":"NC","f":"147","n":"Pitt","lat":35.5925,"lng":-77.3727,"u24":1059,"u25":1084,"u26":255},{"st":"TX","f":"291","n":"Liberty","lat":30.1585,"lng":-94.8441,"u24":1319,"u25":1084,"u26":395},{"st":"NC","f":"125","n":"Moore","lat":35.3083,"lng":-79.4927,"u24":941,"u25":1043,"u26":415},{"st":"TX","f":"257","n":"Kaufman","lat":32.5989,"lng":-96.2884,"u24":1559,"u25":1029,"u26":475},{"st":"TX","f":"479","n":"Webb","lat":27.7608,"lng":-99.3408,"u24":1154,"u25":1029,"u26":447},{"st":"TN","f":"155","n":"Sevier","lat":35.7878,"lng":-83.5249,"u24":1104,"u25":1011,"u26":323},{"st":"NC","f":"021","n":"Buncombe","lat":35.6094,"lng":-82.5304,"u24":1448,"u25":993,"u26":466},{"st":"FL","f":"091","n":"Okaloosa","lat":30.6143,"lng":-86.5911,"u24":1053,"u25":987,"u26":511},{"st":"NC","f":"159","n":"Rowan","lat":35.6414,"lng":-80.5217,"u24":585,"u25":943,"u26":462},{"st":"NC","f":"057","n":"Davidson","lat":35.7951,"lng":-80.2071,"u24":920,"u25":941,"u26":481},{"st":"TN","f":"157","n":"Shelby","lat":35.1846,"lng":-89.8946,"u24":972,"u25":936,"u26":542},{"st":"TX","f":"135","n":"Ector","lat":31.8653,"lng":-102.5425,"u24":1004,"u25":921,"u26":538},{"st":"FL","f":"117","n":"Seminole","lat":28.6901,"lng":-81.132,"u24":763,"u25":895,"u26":330},{"st":"FL","f":"089","n":"Nassau","lat":30.606,"lng":-81.7651,"u24":927,"u25":887,"u26":360},{"st":"NC","f":"191","n":"Wayne","lat":35.3542,"lng":-78.0087,"u24":583,"u25":879,"u26":363},{"st":"FL","f":"085","n":"Martin","lat":27.0836,"lng":-80.3982,"u24":538,"u25":843,"u26":528},{"st":"NC","f":"051","n":"Cumberland","lat":35.0502,"lng":-78.8287,"u24":1013,"u25":825,"u26":245},{"st":"TN","f":"147","n":"Robertson","lat":36.5244,"lng":-86.8726,"u24":983,"u25":821,"u26":350},{"st":"NC","f":"109","n":"Lincoln","lat":35.4885,"lng":-81.2269,"u24":697,"u25":785,"u26":306},{"st":"TX","f":"309","n":"McLennan","lat":31.5496,"lng":-97.2015,"u24":720,"u25":764,"u26":333},{"st":"TN","f":"009","n":"Blount","lat":35.6882,"lng":-83.923,"u24":834,"u25":763,"u26":348},{"st":"FL","f":"073","n":"Leon","lat":30.4593,"lng":-84.2778,"u24":768,"u25":737,"u26":280},{"st":"NC","f":"069","n":"Franklin","lat":36.0882,"lng":-78.2831,"u24":948,"u25":735,"u26":430},{"st":"FL","f":"011","n":"Broward","lat":26.1935,"lng":-80.4767,"u24":757,"u25":730,"u26":315},{"st":"TX","f":"441","n":"Taylor","lat":32.2971,"lng":-99.8904,"u24":412,"u25":726,"u26":466},{"st":"NC","f":"141","n":"Pender","lat":34.5126,"lng":-77.8881,"u24":867,"u25":716,"u26":291},{"st":"FL","f":"001","n":"Alachua","lat":29.6757,"lng":-82.3572,"u24":784,"u25":711,"u26":279},{"st":"FL","f":"055","n":"Highlands","lat":27.3411,"lng":-81.3424,"u24":846,"u25":706,"u26":269},{"st":"TX","f":"053","n":"Burnet","lat":30.7896,"lng":-98.2012,"u24":815,"u25":695,"u26":279},{"st":"TN","f":"011","n":"Bradley","lat":35.1539,"lng":-84.8594,"u24":714,"u25":694,"u26":315},{"st":"NC","f":"089","n":"Henderson","lat":35.3364,"lng":-82.4796,"u24":976,"u25":686,"u26":224},{"st":"TX","f":"373","n":"Polk","lat":30.7846,"lng":-94.8373,"u24":765,"u25":678,"u26":292},{"st":"NC","f":"105","n":"Lee","lat":35.4763,"lng":-79.1721,"u24":602,"u25":674,"u26":288},{"st":"TN","f":"179","n":"Washington","lat":36.2957,"lng":-82.495,"u24":686,"u25":662,"u26":279},{"st":"TX","f":"071","n":"Chambers","lat":29.6964,"lng":-94.6694,"u24":629,"u25":583,"u26":181},{"st":"TN","f":"141","n":"Putnam","lat":36.1409,"lng":-85.4962,"u24":592,"u25":577,"u26":211},{"st":"NC","f":"093","n":"Hoke","lat":35.0172,"lng":-79.242,"u24":681,"u25":554,"u26":184},{"st":"NC","f":"049","n":"Craven","lat":35.1168,"lng":-77.0813,"u24":466,"u25":553,"u26":220},{"st":"TN","f":"105","n":"Loudon","lat":35.7351,"lng":-84.3141,"u24":599,"u25":551,"u26":197},{"st":"TX","f":"375","n":"Potter","lat":35.3987,"lng":-101.8938,"u24":562,"u25":529,"u26":280},{"st":"TX","f":"423","n":"Smith","lat":32.3751,"lng":-95.2689,"u24":451,"u25":527,"u26":225},{"st":"TX","f":"407","n":"San Jacinto","lat":30.5744,"lng":-95.1631,"u24":575,"u25":519,"u26":224},{"st":"FL","f":"129","n":"Wakulla","lat":30.0913,"lng":-84.3591,"u24":468,"u25":518,"u26":172},{"st":"NC","f":"037","n":"Chatham","lat":35.705,"lng":-79.2515,"u24":458,"u25":517,"u26":219},{"st":"NC","f":"027","n":"Caldwell","lat":35.9664,"lng":-81.5125,"u24":217,"u25":499,"u26":126},{"st":"NC","f":"127","n":"Nash","lat":35.9659,"lng":-77.9876,"u24":500,"u25":483,"u26":187},{"st":"TX","f":"471","n":"Walker","lat":30.7432,"lng":-95.5698,"u24":522,"u25":483,"u26":212},{"st":"NC","f":"151","n":"Randolph","lat":35.7099,"lng":-79.8062,"u24":553,"u25":482,"u26":227},{"st":"NC","f":"023","n":"Burke","lat":35.7462,"lng":-81.7062,"u24":322,"u25":479,"u26":158},{"st":"NC","f":"031","n":"Carteret","lat":34.8583,"lng":-76.5359,"u24":559,"u25":475,"u26":178},{"st":"FL","f":"051","n":"Hendry","lat":26.54,"lng":-81.1521,"u24":508,"u25":464,"u26":158},{"st":"TX","f":"349","n":"Navarro","lat":32.0484,"lng":-96.4769,"u24":511,"u25":459,"u26":202},{"st":"TX","f":"231","n":"Hunt","lat":33.1233,"lng":-96.0842,"u24":758,"u25":451,"u26":131},{"st":"TN","f":"163","n":"Sullivan","lat":36.5097,"lng":-82.3013,"u24":423,"u25":447,"u26":246},{"st":"TX","f":"055","n":"Caldwell","lat":29.8324,"lng":-97.6281,"u24":515,"u25":437,"u26":159},{"st":"TN","f":"031","n":"Coffee","lat":35.4888,"lng":-86.0782,"u24":338,"u25":434,"u26":179},{"st":"TX","f":"409","n":"San Patricio","lat":28.0118,"lng":-97.5172,"u24":344,"u25":427,"u26":207},{"st":"NC","f":"045","n":"Cleveland","lat":35.3346,"lng":-81.5571,"u24":411,"u25":396,"u26":174},{"st":"TN","f":"043","n":"Dickson","lat":36.1455,"lng":-87.3642,"u24":353,"u25":391,"u26":183},{"st":"TX","f":"497","n":"Wise","lat":33.2193,"lng":-97.653,"u24":214,"u25":390,"u26":233},{"st":"TN","f":"145","n":"Roane","lat":35.8473,"lng":-84.5239,"u24":224,"u25":380,"u26":141},{"st":"TN","f":"003","n":"Bedford","lat":35.5137,"lng":-86.4583,"u24":622,"u25":377,"u26":138},{"st":"TX","f":"199","n":"Hardin","lat":30.3296,"lng":-94.3932,"u24":358,"u25":373,"u26":154},{"st":"NC","f":"195","n":"Wilson","lat":35.7004,"lng":-77.9216,"u24":398,"u25":357,"u26":131},{"st":"TX","f":"259","n":"Kendall","lat":29.9435,"lng":-98.7093,"u24":517,"u25":357,"u26":228},{"st":"TN","f":"047","n":"Fayette","lat":35.197,"lng":-89.4138,"u24":222,"u25":356,"u26":213},{"st":"TX","f":"473","n":"Waller","lat":30.0136,"lng":-95.9821,"u24":354,"u25":341,"u26":124},{"st":"NC","f":"167","n":"Stanly","lat":35.3104,"lng":-80.2544,"u24":367,"u25":336,"u26":139},{"st":"NC","f":"053","n":"Currituck","lat":36.3722,"lng":-75.9412,"u24":429,"u25":335,"u26":185},{"st":"TX","f":"451","n":"Tom Green","lat":31.3983,"lng":-100.4638,"u24":231,"u25":333,"u26":141},{"st":"NC","f":"157","n":"Rockingham","lat":36.3818,"lng":-79.7828,"u24":344,"u25":332,"u26":162},{"st":"TN","f":"089","n":"Jefferson","lat":36.0485,"lng":-83.4412,"u24":244,"u25":329,"u26":123},{"st":"NC","f":"055","n":"Dare","lat":35.6063,"lng":-75.7675,"u24":371,"u25":325,"u26":149},{"st":"TX","f":"245","n":"Jefferson","lat":29.854,"lng":-94.1493,"u24":335,"u25":325,"u26":101},{"st":"TN","f":"001","n":"Anderson","lat":36.1167,"lng":-84.1954,"u24":281,"u25":317,"u26":158},{"st":"TN","f":"051","n":"Franklin","lat":35.1559,"lng":-86.0992,"u24":387,"u25":316,"u26":150},{"st":"TX","f":"099","n":"Coryell","lat":31.3912,"lng":-97.798,"u24":292,"u25":313,"u26":122},{"st":"TX","f":"367","n":"Parker","lat":32.7771,"lng":-97.8059,"u24":437,"u25":313,"u26":161},{"st":"NC","f":"087","n":"Haywood","lat":35.5589,"lng":-82.9813,"u24":373,"u25":312,"u26":158},{"st":"FL","f":"045","n":"Gulf","lat":29.8592,"lng":-85.272,"u24":302,"u25":302,"u26":177},{"st":"TN","f":"117","n":"Marshall","lat":35.4683,"lng":-86.7659,"u24":319,"u25":299,"u26":138},{"st":"TX","f":"015","n":"Austin","lat":29.8919,"lng":-96.2702,"u24":410,"u25":297,"u26":140},{"st":"NC","f":"135","n":"Orange","lat":36.0625,"lng":-79.12,"u24":325,"u25":292,"u26":160},{"st":"NC","f":"155","n":"Robeson","lat":34.6392,"lng":-79.1009,"u24":335,"u25":291,"u26":119},{"st":"TN","f":"059","n":"Greene","lat":36.1795,"lng":-82.8475,"u24":261,"u25":283,"u26":97},{"st":"TN","f":"021","n":"Cheatham","lat":36.2552,"lng":-87.1008,"u24":271,"u25":281,"u26":70},{"st":"NC","f":"077","n":"Granville","lat":36.2999,"lng":-78.6576,"u24":308,"u25":253,"u26":118},{"st":"NC","f":"169","n":"Stokes","lat":36.3938,"lng":-80.2699,"u24":230,"u25":251,"u26":103},{"st":"TX","f":"321","n":"Matagorda","lat":28.7748,"lng":-96.0015,"u24":153,"u25":251,"u26":94},{"st":"TX","f":"221","n":"Hood","lat":32.4301,"lng":-97.8317,"u24":125,"u25":247,"u26":133},{"st":"TX","f":"013","n":"Atascosa","lat":28.8915,"lng":-98.5354,"u24":224,"u25":242,"u26":83},{"st":"NC","f":"185","n":"Warren","lat":36.3981,"lng":-78.0999,"u24":255,"u25":240,"u26":87},{"st":"NC","f":"039","n":"Cherokee","lat":35.1371,"lng":-84.0614,"u24":232,"u25":239,"u26":91},{"st":"NC","f":"113","n":"Macon","lat":35.153,"lng":-83.4219,"u24":218,"u25":239,"u26":95},{"st":"FL","f":"075","n":"Levy","lat":29.2719,"lng":-82.8312,"u24":199,"u25":236,"u26":52},{"st":"NC","f":"171","n":"Surry","lat":36.4154,"lng":-80.6865,"u24":241,"u25":236,"u26":108},{"st":"TN","f":"113","n":"Madison","lat":35.6061,"lng":-88.8334,"u24":247,"u25":236,"u26":106},{"st":"TN","f":"177","n":"Warren","lat":35.6782,"lng":-85.7773,"u24":259,"u25":235,"u26":116},{"st":"NC","f":"099","n":"Jackson","lat":35.2855,"lng":-83.124,"u24":254,"u25":232,"u26":113},{"st":"NC","f":"189","n":"Watauga","lat":36.2354,"lng":-81.7099,"u24":268,"u25":231,"u26":113},{"st":"FL","f":"087","n":"Monroe","lat":25.5861,"lng":-81.0226,"u24":265,"u25":228,"u26":93},{"st":"FL","f":"133","n":"Washington","lat":30.6021,"lng":-85.6558,"u24":217,"u25":223,"u26":103},{"st":"TN","f":"063","n":"Hamblen","lat":36.2184,"lng":-83.2661,"u24":215,"u25":216,"u26":78},{"st":"NC","f":"161","n":"Rutherford","lat":35.4027,"lng":-81.9196,"u24":191,"u25":203,"u26":90},{"st":"TN","f":"115","n":"Marion","lat":35.1276,"lng":-85.6074,"u24":225,"u25":199,"u26":125},{"st":"TX","f":"477","n":"Washington","lat":30.2151,"lng":-96.4103,"u24":107,"u25":194,"u26":59},{"st":"NC","f":"009","n":"Ashe","lat":36.4435,"lng":-81.4993,"u24":190,"u25":193,"u26":82},{"st":"TX","f":"007","n":"Aransas","lat":28.1226,"lng":-96.9675,"u24":204,"u25":187,"u26":82},{"st":"FL","f":"061","n":"Indian River","lat":27.7005,"lng":-80.5748,"u24":281,"u25":178,"u26":70},{"st":"NC","f":"123","n":"Montgomery","lat":35.3275,"lng":-79.9108,"u24":138,"u25":176,"u26":62},{"st":"TX","f":"183","n":"Gregg","lat":32.4864,"lng":-94.8163,"u24":167,"u25":176,"u26":79},{"st":"NC","f":"175","n":"Transylvania","lat":35.2101,"lng":-82.8167,"u24":207,"u25":172,"u26":71},{"st":"NC","f":"059","n":"Davie","lat":35.9294,"lng":-80.5426,"u24":185,"u25":171,"u26":69},{"st":"TN","f":"019","n":"Carter","lat":36.2847,"lng":-82.1266,"u24":184,"u25":165,"u26":66},{"st":"TN","f":"111","n":"Macon","lat":36.5378,"lng":-86.001,"u24":171,"u25":165,"u26":75},{"st":"TN","f":"123","n":"Monroe","lat":35.4478,"lng":-84.2497,"u24":151,"u25":165,"u26":89},{"st":"NC","f":"111","n":"McDowell","lat":35.6823,"lng":-82.048,"u24":175,"u25":164,"u26":69},{"st":"FL","f":"023","n":"Columbia","lat":30.2217,"lng":-82.6234,"u24":174,"u25":163,"u26":76},{"st":"TN","f":"185","n":"White","lat":35.927,"lng":-85.4558,"u24":209,"u25":163,"u26":94},{"st":"FL","f":"027","n":"DeSoto","lat":27.1906,"lng":-81.8063,"u24":71,"u25":159,"u26":79},{"st":"TX","f":"049","n":"Brown","lat":31.7641,"lng":-98.9985,"u24":138,"u25":159,"u26":59},{"st":"TX","f":"213","n":"Henderson","lat":32.2116,"lng":-95.8534,"u24":247,"u25":159,"u26":71},{"st":"NC","f":"139","n":"Pasquotank","lat":36.2652,"lng":-76.2607,"u24":153,"u25":156,"u26":128},{"st":"TN","f":"173","n":"Union","lat":36.2841,"lng":-83.8361,"u24":134,"u25":154,"u26":45},{"st":"NC","f":"193","n":"Wilkes","lat":36.2089,"lng":-81.1661,"u24":134,"u25":153,"u26":52},{"st":"TN","f":"013","n":"Campbell","lat":36.4016,"lng":-84.1592,"u24":111,"u25":151,"u26":46},{"st":"TN","f":"103","n":"Lincoln","lat":35.1428,"lng":-86.5934,"u24":169,"u25":150,"u26":68},{"st":"TN","f":"139","n":"Polk","lat":35.1094,"lng":-84.5411,"u24":211,"u25":150,"u26":81},{"st":"TX","f":"361","n":"Orange","lat":30.1223,"lng":-93.8941,"u24":163,"u25":149,"u26":99},{"st":"NC","f":"145","n":"Person","lat":36.3864,"lng":-78.9656,"u24":113,"u25":145,"u26":62},{"st":"NC","f":"029","n":"Camden","lat":36.3423,"lng":-76.1625,"u24":105,"u25":144,"u26":85},{"st":"TN","f":"041","n":"DeKalb","lat":35.9822,"lng":-85.8336,"u24":143,"u25":144,"u26":69},{"st":"TN","f":"073","n":"Hawkins","lat":36.4521,"lng":-82.9315,"u24":151,"u25":144,"u26":64},{"st":"TN","f":"159","n":"Smith","lat":36.2566,"lng":-85.9419,"u24":131,"u25":144,"u26":53},{"st":"NC","f":"149","n":"Polk","lat":35.2779,"lng":-82.1676,"u24":143,"u25":141,"u26":58},{"st":"TN","f":"143","n":"Rhea","lat":35.6006,"lng":-84.9495,"u24":158,"u25":140,"u26":88},{"st":"TX","f":"005","n":"Angelina","lat":31.2519,"lng":-94.6111,"u24":98,"u25":139,"u26":52},{"st":"TN","f":"167","n":"Tipton","lat":35.4988,"lng":-89.7471,"u24":177,"u25":136,"u26":61},{"st":"FL","f":"121","n":"Suwannee","lat":30.1892,"lng":-82.9928,"u24":138,"u25":134,"u26":45},{"st":"TN","f":"053","n":"Gibson","lat":35.9916,"lng":-88.9338,"u24":153,"u25":129,"u26":80},{"st":"NC","f":"107","n":"Lenoir","lat":35.2401,"lng":-77.6355,"u24":148,"u25":127,"u26":59},{"st":"NC","f":"011","n":"Avery","lat":36.0721,"lng":-81.9203,"u24":95,"u25":126,"u26":56},{"st":"TX","f":"485","n":"Wichita","lat":33.9882,"lng":-98.708,"u24":205,"u25":126,"u26":63},{"st":"FL","f":"063","n":"Jackson","lat":30.7892,"lng":-85.2088,"u24":113,"u25":122,"u26":54},{"st":"TX","f":"493","n":"Wilson","lat":29.1739,"lng":-98.0867,"u24":135,"u25":122,"u26":51},{"st":"TX","f":"057","n":"Calhoun","lat":28.4417,"lng":-96.5796,"u24":95,"u25":120,"u26":35},{"st":"NC","f":"013","n":"Beaufort","lat":35.4823,"lng":-76.842,"u24":216,"u25":119,"u26":54},{"st":"NC","f":"061","n":"Duplin","lat":34.9344,"lng":-77.9335,"u24":120,"u25":117,"u26":79},{"st":"NC","f":"115","n":"Madison","lat":35.8642,"lng":-82.7126,"u24":200,"u25":117,"u26":76},{"st":"NC","f":"163","n":"Sampson","lat":34.9893,"lng":-78.3713,"u24":189,"u25":117,"u26":62},{"st":"TN","f":"081","n":"Hickman","lat":35.8023,"lng":-87.4671,"u24":121,"u25":117,"u26":53},{"st":"TX","f":"481","n":"Wharton","lat":29.2785,"lng":-96.2297,"u24":146,"u25":117,"u26":62},{"st":"NC","f":"197","n":"Yadkin","lat":36.1588,"lng":-80.6652,"u24":132,"u25":116,"u26":49},{"st":"NC","f":"181","n":"Vance","lat":36.3655,"lng":-78.4054,"u24":73,"u25":115,"u26":37},{"st":"FL","f":"037","n":"Franklin","lat":29.6778,"lng":-84.8152,"u24":113,"u25":112,"u26":66},{"st":"NC","f":"199","n":"Yancey","lat":35.8893,"lng":-82.304,"u24":100,"u25":109,"u26":79},{"st":"NC","f":"043","n":"Clay","lat":35.053,"lng":-83.7523,"u24":137,"u25":108,"u26":42},{"st":"NC","f":"003","n":"Alexander","lat":35.921,"lng":-81.1775,"u24":113,"u25":103,"u26":44},{"st":"TN","f":"035","n":"Cumberland","lat":35.9524,"lng":-84.9948,"u24":114,"u25":102,"u26":33},{"st":"TX","f":"059","n":"Callahan","lat":32.2931,"lng":-99.3722,"u24":11,"u25":102,"u26":37},{"st":"TX","f":"299","n":"Llano","lat":30.7076,"lng":-98.6847,"u24":117,"u25":102,"u26":41},{"st":"FL","f":"003","n":"Baker","lat":30.3244,"lng":-82.3023,"u24":99,"u25":99,"u26":57},{"st":"FL","f":"043","n":"Glades","lat":26.9548,"lng":-81.1908,"u24":65,"u25":98,"u26":66},{"st":"NC","f":"137","n":"Pamlico","lat":35.1476,"lng":-76.6653,"u24":107,"u25":97,"u26":24},{"st":"TX","f":"265","n":"Kerr","lat":30.06,"lng":-99.3533,"u24":98,"u25":96,"u26":62},{"st":"FL","f":"041","n":"Gilchrist","lat":29.7235,"lng":-82.7958,"u24":94,"u25":94,"u26":21},{"st":"TN","f":"055","n":"Giles","lat":35.2027,"lng":-87.0353,"u24":67,"u25":94,"u26":39},{"st":"NC","f":"017","n":"Bladen","lat":34.5919,"lng":-78.5395,"u24":159,"u25":93,"u26":14},{"st":"TN","f":"015","n":"Cannon","lat":35.8084,"lng":-86.0624,"u24":157,"u25":92,"u26":34},{"st":"TN","f":"121","n":"Meigs","lat":35.5122,"lng":-84.8161,"u24":94,"u25":90,"u26":42},{"st":"TN","f":"169","n":"Trousdale","lat":36.393,"lng":-86.1567,"u24":89,"u25":89,"u26":40},{"st":"FL","f":"107","n":"Putnam","lat":29.5939,"lng":-81.732,"u24":113,"u25":88,"u26":21},{"st":"FL","f":"049","n":"Hardee","lat":27.4928,"lng":-81.8216,"u24":101,"u25":86,"u26":55},{"st":"NC","f":"173","n":"Swain","lat":35.5688,"lng":-83.4656,"u24":73,"u25":84,"u26":31},{"st":"NC","f":"005","n":"Alleghany","lat":36.4894,"lng":-81.1323,"u24":91,"u25":82,"u26":46},{"st":"TN","f":"025","n":"Claiborne","lat":36.5016,"lng":-83.6607,"u24":98,"u25":82,"u26":41},{"st":"TX","f":"381","n":"Randall","lat":34.9625,"lng":-101.8955,"u24":39,"u25":80,"u26":21},{"st":"TN","f":"045","n":"Dyer","lat":36.0542,"lng":-89.3983,"u24":68,"u25":75,"u26":33},{"st":"TX","f":"097","n":"Cooke","lat":33.6392,"lng":-97.2103,"u24":178,"u25":75,"u26":17},{"st":"TX","f":"467","n":"Van Zandt","lat":32.5588,"lng":-95.8369,"u24":45,"u25":74,"u26":29},{"st":"TX","f":"465","n":"Val Verde","lat":29.8753,"lng":-101.1433,"u24":85,"u25":73,"u26":33},{"st":"NC","f":"083","n":"Halifax","lat":36.2514,"lng":-77.6448,"u24":55,"u25":72,"u26":62},{"st":"TX","f":"325","n":"Medina","lat":29.3537,"lng":-99.1111,"u24":102,"u25":71,"u26":36},{"st":"FL","f":"093","n":"Okeechobee","lat":27.3856,"lng":-80.8874,"u24":18,"u25":68,"u26":31},{"st":"FL","f":"007","n":"Bradford","lat":29.9524,"lng":-82.1667,"u24":93,"u25":67,"u26":39},{"st":"TX","f":"003","n":"Andrews","lat":32.3123,"lng":-102.6402,"u24":24,"u25":67,"u26":77},{"st":"TX","f":"185","n":"Grimes","lat":30.5432,"lng":-95.9881,"u24":110,"u25":65,"u26":11},{"st":"TX","f":"037","n":"Bowie","lat":33.4461,"lng":-94.4224,"u24":55,"u25":64,"u26":38},{"st":"TX","f":"255","n":"Karnes","lat":28.909,"lng":-97.8522,"u24":78,"u25":64,"u26":26},{"st":"TX","f":"323","n":"Maverick","lat":28.7298,"lng":-100.3167,"u24":60,"u25":64,"u26":27},{"st":"TX","f":"499","n":"Wood","lat":32.7836,"lng":-95.3822,"u24":35,"u25":63,"u26":1},{"st":"TN","f":"183","n":"Weakley","lat":36.3036,"lng":-88.7212,"u24":69,"u25":62,"u26":26},{"st":"TX","f":"217","n":"Hill","lat":31.9826,"lng":-97.1306,"u24":65,"u25":62,"u26":18},{"st":"TN","f":"057","n":"Grainger","lat":36.2775,"lng":-83.5095,"u24":74,"u25":61,"u26":33},{"st":"TX","f":"223","n":"Hopkins","lat":33.149,"lng":-95.5654,"u24":66,"u25":61,"u26":26},{"st":"NC","f":"079","n":"Greene","lat":35.482,"lng":-77.6817,"u24":52,"u25":59,"u26":18},{"st":"NC","f":"165","n":"Scotland","lat":34.84,"lng":-79.4773,"u24":70,"u25":59,"u26":26},{"st":"FL","f":"039","n":"Gadsden","lat":30.5787,"lng":-84.6126,"u24":71,"u25":57,"u26":25},{"st":"FL","f":"123","n":"Taylor","lat":29.9671,"lng":-83.6396,"u24":48,"u25":57,"u26":52},{"st":"TX","f":"331","n":"Milam","lat":30.7912,"lng":-96.9844,"u24":77,"u25":56,"u26":25},{"st":"FL","f":"065","n":"Jefferson","lat":30.3969,"lng":-83.9218,"u24":64,"u25":55,"u26":25},{"st":"NC","f":"007","n":"Anson","lat":34.975,"lng":-80.1098,"u24":55,"u25":52,"u26":23},{"st":"FL","f":"029","n":"Dixie","lat":29.5527,"lng":-83.2362,"u24":49,"u25":51,"u26":28},{"st":"NC","f":"065","n":"Edgecombe","lat":35.9171,"lng":-77.6027,"u24":45,"u25":51,"u26":15},{"st":"TX","f":"171","n":"Gillespie","lat":30.3251,"lng":-98.9419,"u24":52,"u25":51,"u26":20},{"st":"NC","f":"033","n":"Caswell","lat":36.3943,"lng":-79.3396,"u24":54,"u25":50,"u26":30},{"st":"NC","f":"153","n":"Richmond","lat":35.0046,"lng":-79.7557,"u24":52,"u25":49,"u26":26},{"st":"NC","f":"041","n":"Chowan","lat":36.129,"lng":-76.6028,"u24":48,"u25":48,"u26":34},{"st":"NC","f":"047","n":"Columbus","lat":34.2616,"lng":-78.6393,"u24":24,"u25":48,"u26":21},{"st":"NC","f":"103","n":"Jones","lat":35.0323,"lng":-77.3562,"u24":39,"u25":46,"u26":9},{"st":"FL","f":"125","n":"Union","lat":30.0543,"lng":-82.3669,"u24":45,"u25":45,"u26":26},{"st":"NC","f":"121","n":"Mitchell","lat":36.0131,"lng":-82.1636,"u24":44,"u25":44,"u26":28},{"st":"TX","f":"277","n":"Lamar","lat":33.6673,"lng":-95.5703,"u24":32,"u25":44,"u26":21},{"st":"NC","f":"143","n":"Perquimans","lat":36.1809,"lng":-76.4032,"u24":46,"u25":43,"u26":27},{"st":"TX","f":"489","n":"Willacy","lat":26.4819,"lng":-97.5947,"u24":36,"u25":43,"u26":14},{"st":"TN","f":"085","n":"Humphreys","lat":36.0408,"lng":-87.7905,"u24":39,"u25":42,"u26":19},{"st":"TX","f":"469","n":"Victoria","lat":28.7964,"lng":-96.9712,"u24":33,"u25":42,"u26":34},{"st":"FL","f":"067","n":"Lafayette","lat":29.9901,"lng":-83.1785,"u24":42,"u25":41,"u26":25},{"st":"TX","f":"147","n":"Fannin","lat":33.5912,"lng":-96.105,"u24":64,"u25":41,"u26":63},{"st":"FL","f":"079","n":"Madison","lat":30.4472,"lng":-83.4704,"u24":29,"u25":39,"u26":19},{"st":"NC","f":"015","n":"Bertie","lat":36.059,"lng":-76.9624,"u24":46,"u25":37,"u26":9},{"st":"TX","f":"065","n":"Carson","lat":35.4055,"lng":-101.3554,"u24":39,"u25":37,"u26":14},{"st":"TN","f":"069","n":"Hardeman","lat":35.2188,"lng":-88.9887,"u24":41,"u25":36,"u26":8},{"st":"TX","f":"203","n":"Harrison","lat":32.548,"lng":-94.3744,"u24":56,"u25":36,"u26":32},{"st":"NC","f":"095","n":"Hyde","lat":35.4082,"lng":-76.1537,"u24":11,"u25":35,"u26":3},{"st":"TX","f":"051","n":"Burleson","lat":30.4935,"lng":-96.6221,"u24":42,"u25":35,"u26":41},{"st":"FL","f":"047","n":"Hamilton","lat":30.4984,"lng":-82.9511,"u24":26,"u25":34,"u26":9},{"st":"TN","f":"107","n":"McMinn","lat":35.4245,"lng":-84.6199,"u24":31,"u25":33,"u26":42},{"st":"TX","f":"347","n":"Nacogdoches","lat":31.6206,"lng":-94.6202,"u24":35,"u25":31,"u26":13},{"st":"FL","f":"013","n":"Calhoun","lat":30.3888,"lng":-85.1979,"u24":30,"u25":29,"u26":10},{"st":"NC","f":"075","n":"Graham","lat":35.3484,"lng":-83.8309,"u24":31,"u25":28,"u26":11},{"st":"TN","f":"127","n":"Moore","lat":35.2889,"lng":-86.3587,"u24":31,"u25":28,"u26":13},{"st":"TN","f":"171","n":"Unicoi","lat":36.1001,"lng":-82.4182,"u24":24,"u25":28,"u26":8},{"st":"TN","f":"131","n":"Obion","lat":36.3619,"lng":-89.1481,"u24":21,"u25":27,"u26":8},{"st":"TX","f":"089","n":"Colorado","lat":29.5963,"lng":-96.5089,"u24":29,"u25":27,"u26":12},{"st":"TX","f":"241","n":"Jasper","lat":30.7529,"lng":-94.0223,"u24":30,"u25":27,"u26":9},{"st":"TX","f":"425","n":"Somervell","lat":32.2181,"lng":-97.7692,"u24":21,"u25":27,"u26":19},{"st":"TN","f":"027","n":"Clay","lat":36.5457,"lng":-85.5457,"u24":25,"u25":26,"u26":13},{"st":"TX","f":"389","n":"Reeves","lat":31.3084,"lng":-103.7127,"u24":22,"u25":26,"u26":25},{"st":"TN","f":"033","n":"Crockett","lat":35.8188,"lng":-89.1325,"u24":26,"u25":25,"u26":12},{"st":"TN","f":"097","n":"Lauderdale","lat":35.763,"lng":-89.6277,"u24":24,"u25":24,"u26":14},{"st":"TX","f":"073","n":"Cherokee","lat":31.8439,"lng":-95.1563,"u24":39,"u25":23,"u26":9},{"st":"TX","f":"459","n":"Upshur","lat":32.7353,"lng":-94.9412,"u24":32,"u25":23,"u26":2},{"st":"TX","f":"293","n":"Limestone","lat":31.5475,"lng":-96.5936,"u24":17,"u25":22,"u26":8},{"st":"TN","f":"071","n":"Hardin","lat":35.2019,"lng":-88.1857,"u24":12,"u25":21,"u26":13},{"st":"TN","f":"099","n":"Lawrence","lat":35.2205,"lng":-87.3965,"u24":18,"u25":20,"u26":8},{"st":"TN","f":"101","n":"Lewis","lat":35.5232,"lng":-87.497,"u24":13,"u25":20,"u26":7},{"st":"TN","f":"077","n":"Henderson","lat":35.654,"lng":-88.3877,"u24":19,"u25":19,"u26":10},{"st":"TX","f":"123","n":"DeWitt","lat":29.0823,"lng":-97.3617,"u24":9,"u25":19,"u26":0},{"st":"TX","f":"363","n":"Palo Pinto","lat":32.7522,"lng":-98.318,"u24":27,"u25":19,"u26":7},{"st":"FL","f":"077","n":"Liberty","lat":30.2598,"lng":-84.8686,"u24":11,"u25":18,"u26":10},{"st":"NC","f":"177","n":"Tyrrell","lat":35.8704,"lng":-76.1653,"u24":11,"u25":18,"u26":8},{"st":"TN","f":"079","n":"Henry","lat":36.3253,"lng":-88.3003,"u24":19,"u25":18,"u26":8},{"st":"TX","f":"063","n":"Camp","lat":32.9746,"lng":-94.9791,"u24":3,"u25":18,"u26":8},{"st":"TX","f":"273","n":"Kleberg","lat":27.4387,"lng":-97.6606,"u24":24,"u25":18,"u26":2},{"st":"TX","f":"391","n":"Refugio","lat":28.3221,"lng":-97.1625,"u24":24,"u25":18,"u26":5},{"st":"TX","f":"281","n":"Lampasas","lat":31.1967,"lng":-98.2409,"u24":18,"u25":17,"u26":7},{"st":"TX","f":"341","n":"Moore","lat":35.8357,"lng":-101.8905,"u24":25,"u25":17,"u26":3},{"st":"TX","f":"377","n":"Presidio","lat":30.0059,"lng":-104.2616,"u24":23,"u25":17,"u26":9},{"st":"TN","f":"061","n":"Grundy","lat":35.3934,"lng":-85.7104,"u24":16,"u25":16,"u26":8},{"st":"TX","f":"025","n":"Bee","lat":28.4161,"lng":-97.7426,"u24":15,"u25":16,"u26":7},{"st":"TX","f":"149","n":"Fayette","lat":29.8779,"lng":-96.9212,"u24":19,"u25":16,"u26":3},{"st":"NC","f":"131","n":"Northampton","lat":36.4218,"lng":-77.3984,"u24":17,"u25":15,"u26":5},{"st":"TX","f":"117","n":"Deaf Smith","lat":34.9408,"lng":-102.6076,"u24":17,"u25":15,"u26":6},{"st":"TX","f":"287","n":"Lee","lat":30.3215,"lng":-96.9768,"u24":18,"u25":15,"u26":26},{"st":"TX","f":"421","n":"Sherman","lat":36.2786,"lng":-101.8993,"u24":17,"u25":15,"u26":5},{"st":"TN","f":"153","n":"Sequatchie","lat":35.3723,"lng":-85.4101,"u24":33,"u25":14,"u26":11},{"st":"TN","f":"161","n":"Stewart","lat":36.4585,"lng":-87.8119,"u24":15,"u25":14,"u26":4},{"st":"TX","f":"133","n":"Eastland","lat":32.3246,"lng":-98.8366,"u24":10,"u25":14,"u26":7},{"st":"TX","f":"227","n":"Howard","lat":32.3034,"lng":-101.4387,"u24":62,"u25":14,"u26":17},{"st":"TX","f":"353","n":"Nolan","lat":32.3123,"lng":-100.4181,"u24":15,"u25":14,"u26":7},{"st":"TN","f":"075","n":"Haywood","lat":35.5867,"lng":-89.2827,"u24":22,"u25":13,"u26":2},{"st":"TX","f":"001","n":"Anderson","lat":31.8413,"lng":-95.6617,"u24":20,"u25":13,"u26":15},{"st":"TX","f":"165","n":"Gaines","lat":32.7439,"lng":-102.6316,"u24":19,"u25":13,"u26":7},{"st":"TX","f":"379","n":"Rains","lat":32.8705,"lng":-95.7956,"u24":21,"u25":13,"u26":3},{"st":"TX","f":"449","n":"Titus","lat":33.2146,"lng":-94.9668,"u24":35,"u25":13,"u26":5},{"st":"TX","f":"503","n":"Young","lat":33.1588,"lng":-98.6784,"u24":5,"u25":13,"u26":7},{"st":"FL","f":"059","n":"Holmes","lat":30.862,"lng":-85.8159,"u24":12,"u25":12,"u26":7},{"st":"NC","f":"073","n":"Gates","lat":36.4421,"lng":-76.7024,"u24":14,"u25":12,"u26":5},{"st":"TN","f":"017","n":"Carroll","lat":35.9657,"lng":-88.4524,"u24":8,"u25":12,"u26":6},{"st":"TN","f":"023","n":"Chester","lat":35.4203,"lng":-88.6114,"u24":16,"u25":12,"u26":12},{"st":"TN","f":"135","n":"Perry","lat":35.6638,"lng":-87.8693,"u24":12,"u25":12,"u26":5},{"st":"TX","f":"009","n":"Archer","lat":33.6163,"lng":-98.6873,"u24":23,"u25":12,"u26":5},{"st":"TX","f":"035","n":"Bosque","lat":31.9008,"lng":-97.6376,"u24":15,"u25":12,"u26":3},{"st":"TX","f":"387","n":"Red River","lat":33.6196,"lng":-95.0484,"u24":14,"u25":12,"u26":6},{"st":"TX","f":"177","n":"Gonzales","lat":29.4619,"lng":-97.4919,"u24":11,"u25":11,"u26":8},{"st":"TX","f":"285","n":"Lavaca","lat":29.3826,"lng":-96.9236,"u24":9,"u25":11,"u26":4},{"st":"TX","f":"337","n":"Montague","lat":33.6784,"lng":-97.725,"u24":23,"u25":11,"u26":2},{"st":"TX","f":"463","n":"Uvalde","lat":29.3503,"lng":-99.7684,"u24":15,"u25":11,"u26":17},{"st":"TX","f":"031","n":"Blanco","lat":30.2662,"lng":-98.3993,"u24":10,"u25":10,"u26":3},{"st":"TX","f":"193","n":"Hamilton","lat":31.7073,"lng":-98.1118,"u24":16,"u25":10,"u26":5},{"st":"TN","f":"133","n":"Overton","lat":36.3449,"lng":-85.2831,"u24":17,"u25":9,"u26":3},{"st":"TX","f":"093","n":"Comanche","lat":31.9516,"lng":-98.5496,"u24":4,"u25":9,"u26":3},{"st":"TX","f":"297","n":"Live Oak","lat":28.3515,"lng":-98.127,"u24":12,"u25":9,"u26":4},{"st":"TX","f":"501","n":"Yoakum","lat":33.1623,"lng":-102.8322,"u24":6,"u25":9,"u26":4},{"st":"TX","f":"119","n":"Delta","lat":33.3859,"lng":-95.6733,"u24":7,"u25":8,"u26":11},{"st":"TX","f":"143","n":"Erath","lat":32.2367,"lng":-98.2205,"u24":27,"u25":8,"u26":4},{"st":"TX","f":"163","n":"Frio","lat":28.8694,"lng":-99.109,"u24":12,"u25":8,"u26":4},{"st":"TX","f":"237","n":"Jack","lat":33.2322,"lng":-98.1712,"u24":10,"u25":8,"u26":1},{"st":"TX","f":"365","n":"Panola","lat":32.164,"lng":-94.3052,"u24":6,"u25":8,"u26":2},{"st":"TX","f":"475","n":"Ward","lat":31.5131,"lng":-103.1051,"u24":7,"u25":8,"u26":2},{"st":"TN","f":"039","n":"Decatur","lat":35.6031,"lng":-88.1103,"u24":10,"u25":7,"u26":5},{"st":"TX","f":"169","n":"Garza","lat":33.1838,"lng":-101.3011,"u24":5,"u25":7,"u26":1},{"st":"TX","f":"219","n":"Hockley","lat":33.6059,"lng":-102.3434,"u24":7,"u25":7,"u26":3},{"st":"TX","f":"315","n":"Marion","lat":32.7982,"lng":-94.3569,"u24":6,"u25":7,"u26":3},{"st":"TX","f":"043","n":"Brewster","lat":29.809,"lng":-103.2525,"u24":7,"u25":6,"u26":1},{"st":"TX","f":"145","n":"Falls","lat":31.2519,"lng":-96.9341,"u24":4,"u25":6,"u26":3},{"st":"TX","f":"369","n":"Parmer","lat":34.5322,"lng":-102.7849,"u24":4,"u25":6,"u26":0},{"st":"TX","f":"109","n":"Culberson","lat":31.4459,"lng":-104.5269,"u24":9,"u25":5,"u26":2},{"st":"TX","f":"189","n":"Hale","lat":34.0684,"lng":-101.8229,"u24":13,"u25":5,"u26":0},{"st":"TN","f":"091","n":"Johnson","lat":36.4532,"lng":-81.8612,"u24":6,"u25":4,"u26":4},{"st":"TN","f":"109","n":"McNairy","lat":35.1754,"lng":-88.5637,"u24":7,"u25":4,"u26":6},{"st":"TN","f":"175","n":"Van Buren","lat":35.6992,"lng":-85.4584,"u24":8,"u25":3,"u26":2},{"st":"TX","f":"067","n":"Cass","lat":33.0837,"lng":-94.3576,"u24":12,"u25":3,"u26":9},{"st":"TX","f":"179","n":"Gray","lat":35.4025,"lng":-100.8124,"u24":7,"u25":3,"u26":2},{"st":"TX","f":"111","n":"Dallam","lat":36.2864,"lng":-102.594,"u24":8,"u25":2,"u26":1},{"st":"TX","f":"175","n":"Goliad","lat":28.6607,"lng":-97.4304,"u24":10,"u25":2,"u26":1},{"st":"TX","f":"415","n":"Scurry","lat":32.7444,"lng":-100.9133,"u24":32,"u25":1,"u26":2}];
+const FL_U26_MONTHS = 5; // 2026 YTD covers Jan–May
+
+// Simplified state boundaries [lng,lat] — drawn on the radar + tile-outage fallback
+const ST_OUTLINES = {"FL":[[[-85.497,30.998],[-85.004,31.003],[-84.867,30.713],[-83.498,30.647],[-82.216,30.57],[-82.167,30.357],[-82.047,30.362],[-82.003,30.565],[-82.041,30.751],[-81.948,30.828],[-81.718,30.746],[-81.444,30.707],[-81.384,30.275],[-81.258,29.787],[-80.968,29.146],[-80.524,28.462],[-80.59,28.412],[-80.568,28.095],[-80.382,27.739],[-80.091,27.021],[-80.031,26.797],[-80.037,26.567],[-80.146,25.74],[-80.239,25.723],[-80.338,25.466],[-80.305,25.384],[-80.497,25.197],[-80.573,25.241],[-80.76,25.165],[-81.077,25.121],[-81.17,25.225],[-81.127,25.378],[-81.351,25.822],[-81.526,25.904],[-81.68,25.844],[-81.8,26.09],[-81.833,26.293],[-82.041,26.517],[-82.09,26.665],[-82.058,26.879],[-82.173,26.917],[-82.145,26.791],[-82.249,26.758],[-82.567,27.301],[-82.693,27.438],[-82.392,27.837],[-82.589,27.815],[-82.72,27.689],[-82.852,27.887],[-82.677,28.434],[-82.644,28.889],[-82.764,28.998],[-82.802,29.146],[-82.994,29.179],[-83.219,29.42],[-83.399,29.519],[-83.41,29.667],[-83.536,29.721],[-83.64,29.886],[-84.024,30.105],[-84.358,30.056],[-84.342,29.902],[-84.451,29.93],[-84.867,29.743],[-85.311,29.7],[-85.3,29.809],[-85.404,29.94],[-85.924,30.236],[-86.297,30.362],[-86.631,30.395],[-86.91,30.373],[-87.518,30.28],[-87.37,30.428],[-87.447,30.51],[-87.409,30.674],[-87.633,30.866],[-87.6,30.998],[-85.497,30.998]]],"NC":[[[-80.979,36.562],[-80.294,36.546],[-79.511,36.54],[-75.869,36.551],[-75.754,36.151],[-76.033,36.19],[-76.071,36.14],[-76.411,36.08],[-76.46,36.025],[-76.685,36.009],[-76.674,35.938],[-76.4,35.987],[-76.362,35.943],[-76.06,35.993],[-75.962,35.899],[-75.781,35.938],[-75.715,35.697],[-75.776,35.582],[-75.896,35.571],[-76.148,35.324],[-76.482,35.313],[-76.537,35.144],[-76.394,34.974],[-76.279,34.941],[-76.493,34.662],[-76.674,34.694],[-76.991,34.667],[-77.211,34.607],[-77.556,34.415],[-77.829,34.163],[-77.972,33.846],[-78.18,33.917],[-78.541,33.851],[-79.675,34.804],[-80.798,34.82],[-80.781,34.935],[-80.935,35.105],[-81.039,35.045],[-81.044,35.149],[-82.277,35.198],[-82.551,35.16],[-82.764,35.067],[-83.109,35.001],[-83.619,34.985],[-84.32,34.99],[-84.292,35.226],[-84.095,35.248],[-84.018,35.412],[-83.772,35.56],[-83.498,35.565],[-83.252,35.719],[-82.994,35.773],[-82.775,35.998],[-82.638,36.064],[-82.611,35.965],[-82.216,36.157],[-82.036,36.118],[-81.91,36.305],[-81.724,36.354],[-81.68,36.589],[-80.979,36.562]]],"TN":[[[-88.055,36.496],[-88.071,36.677],[-87.852,36.633],[-86.593,36.655],[-85.486,36.617],[-85.289,36.628],[-84.544,36.595],[-83.69,36.584],[-83.673,36.6],[-81.68,36.589],[-81.724,36.354],[-81.91,36.305],[-82.036,36.118],[-82.216,36.157],[-82.611,35.965],[-82.638,36.064],[-82.775,35.998],[-82.994,35.773],[-83.252,35.719],[-83.498,35.565],[-83.772,35.56],[-84.018,35.412],[-84.095,35.248],[-84.292,35.226],[-84.32,34.99],[-85.607,34.985],[-87.359,35.001],[-88.203,34.996],[-88.471,34.996],[-90.311,34.996],[-90.213,35.023],[-90.114,35.198],[-90.131,35.439],[-89.944,35.604],[-89.912,35.757],[-89.764,35.812],[-89.731,35.998],[-89.534,36.25],[-89.539,36.496],[-89.484,36.496],[-89.419,36.496],[-89.298,36.507],[-88.055,36.496]]],"TX":[[[-101.813,36.502],[-100.0,36.502],[-100.0,34.563],[-99.923,34.574],[-99.699,34.382],[-99.578,34.415],[-99.261,34.404],[-99.189,34.212],[-98.987,34.223],[-98.768,34.136],[-98.571,34.147],[-98.488,34.065],[-98.362,34.158],[-98.171,34.114],[-98.089,34.004],[-97.946,33.988],[-97.87,33.851],[-97.694,33.982],[-97.459,33.906],[-97.371,33.824],[-97.256,33.862],[-97.174,33.736],[-96.922,33.961],[-96.851,33.846],[-96.632,33.846],[-96.424,33.774],[-96.347,33.687],[-96.15,33.84],[-95.936,33.889],[-95.838,33.835],[-95.602,33.933],[-95.547,33.878],[-95.29,33.873],[-95.224,33.961],[-94.967,33.862],[-94.868,33.747],[-94.485,33.637],[-94.381,33.544],[-94.184,33.594],[-94.041,33.55],[-94.041,33.019],[-94.041,31.994],[-93.822,31.775],[-93.817,31.556],[-93.543,31.151],[-93.526,30.937],[-93.63,30.68],[-93.729,30.576],[-93.696,30.439],[-93.767,30.335],[-93.691,30.143],[-93.926,29.787],[-93.839,29.689],[-94.003,29.683],[-94.523,29.546],[-94.709,29.623],[-94.742,29.787],[-94.874,29.672],[-94.967,29.7],[-95.016,29.557],[-94.912,29.497],[-94.896,29.311],[-95.082,29.113],[-95.383,28.867],[-95.985,28.604],[-96.046,28.648],[-96.226,28.582],[-96.232,28.642],[-96.478,28.599],[-96.593,28.725],[-96.665,28.697],[-96.402,28.44],[-96.593,28.358],[-96.774,28.407],[-96.802,28.226],[-97.026,28.04],[-97.256,27.695],[-97.404,27.333],[-97.514,27.361],[-97.541,27.229],[-97.426,27.262],[-97.481,26.999],[-97.557,26.988],[-97.563,26.841],[-97.47,26.758],[-97.442,26.457],[-97.333,26.353],[-97.305,26.161],[-97.218,25.992],[-97.524,25.888],[-97.65,26.019],[-97.886,26.068],[-98.198,26.057],[-98.467,26.222],[-98.669,26.238],[-98.823,26.37],[-99.031,26.413],[-99.173,26.539],[-99.266,26.841],[-99.447,27.021],[-99.425,27.175],[-99.507,27.339],[-99.48,27.481],[-99.606,27.64],[-99.71,27.657],[-99.88,27.799],[-99.934,27.98],[-100.082,28.144],[-100.296,28.281],[-100.4,28.582],[-100.498,28.664],[-100.63,28.905],[-100.674,29.103],[-100.8,29.245],[-101.013,29.371],[-101.063,29.459],[-101.26,29.535],[-101.413,29.754],[-101.851,29.804],[-102.114,29.793],[-102.339,29.869],[-102.388,29.765],[-102.629,29.732],[-102.81,29.524],[-102.919,29.19],[-102.98,29.185],[-103.116,28.987],[-103.281,28.982],[-103.527,29.135],[-104.146,29.382],[-104.267,29.513],[-104.508,29.639],[-104.677,29.924],[-104.688,30.181],[-104.858,30.39],[-104.896,30.57],[-105.006,30.685],[-105.395,30.855],[-105.603,31.085],[-105.773,31.167],[-105.954,31.364],[-106.205,31.469],[-106.381,31.731],[-106.529,31.786],[-106.644,31.901],[-106.616,32.0],[-103.067,32.0],[-103.067,33.002],[-103.045,34.015],[-103.04,36.502],[-103.001,36.502],[-101.813,36.502]]]};
+const RADAR_BOUNDS = { FL: [[24.35,-87.7],[31.1,-79.8]], TX: [[25.6,-106.8],[36.7,-93.3]], NC: [[33.7,-84.5],[36.7,-75.3]], TN: [[34.9,-90.4],[36.8,-81.5]], ALL: [[25.0,-107.0],[37.2,-75.0]] };
+const RADAR_STATES = ["FL", "TX", "NC", "TN"];
+
+const RADAR_TIERS = [
+  ["ON FIRE",    CC.signal,   76],
+  ["HEATING UP", "#FF9F45",   60],
+  ["WATCH LIST", CC.amber,    45],
+  ["TOO EARLY",  CC.cyan,     30],
+  ["COLD",       CC.stakeDim, -1],
+];
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+/* Demand model — 58% volume (log-scaled: Harris's 17k ≠ 17× hotter than 1k),
+   42% momentum (2026 permit pace vs 2025, plus 2025 vs 2024). One scale across
+   all states so a TX 80 means the same heat as a FL 80. */
+const RADAR_MAXVOL = Math.max.apply(null, RADAR_PERMITS.map((c) => (c.u25 + (c.u26 / FL_U26_MONTHS) * 12) / 2));
+const RADAR_HOTSPOTS = RADAR_PERMITS.map((c) => {
+  const pace26 = Math.round((c.u26 / FL_U26_MONTHS) * 12);
+  const vol = (c.u25 + pace26) / 2;
+  const volN = clamp01((Math.log10(Math.max(vol, 1) + 10) - 1) / (Math.log10(RADAR_MAXVOL + 10) - 1));
+  const mom = 0.65 * (pace26 / Math.max(c.u25, 1)) + 0.35 * (c.u25 / Math.max(c.u24, 1));
+  const momN = clamp01((mom - 0.65) / 0.7);
+  const score = Math.round(100 * (0.58 * volN + 0.42 * momN));
+  const t = RADAR_TIERS.find((x) => score >= x[2]) || RADAR_TIERS[RADAR_TIERS.length - 1];
+  const chg = c.u25 > 0 ? Math.round((pace26 / c.u25 - 1) * 100) : 0;
+  return { ...c, pace26, score, tier: t[0], color: t[1], chg, volN };
+}).sort((a, b) => b.score - a.score);
+const stateRank = (c) => {
+  const peers = RADAR_HOTSPOTS.filter((x) => x.st === c.st);
+  return { rank: peers.indexOf(c) + 1, of: peers.length };
+};
+// FL bbox — lot lines / owner cards / sales scans ride the FL cadastral only (for now)
+const inFlorida = (lat, lng) => lat >= 24.3 && lat <= 31.2 && lng >= -87.7 && lng <= -79.8;
+
+function hotspotInsight(c) {
+  const dir = c.chg >= 8 ? `accelerating — 2026 permit pace is running +${c.chg}% vs 2025`
+    : c.chg <= -8 ? `cooling — 2026 pace is ${c.chg}% vs 2025`
+    : `holding steady — 2026 pace within ${Math.abs(c.chg)}% of 2025`;
+  const play = c.score >= 60 ? "Builders are consuming dirt here — get lots under contract ahead of them."
+    : c.score >= 45 ? "Real volume but watch the trend — scan recent land sales before spending on marketing."
+    : "Thin builder volume — only chase deep-discount deals with a known exit.";
+  return `${c.n} County, ${c.st} pulled ${c.u25.toLocaleString()} single-family permits in 2025 and is ${dir}. ${play}`;
+}
+
+function verdictHeat(v) {
+  if (!v) return CC.phosphor;
+  if (v.includes("FIRE")) return CC.signal;
+  if (v.includes("HEATING")) return "#FF9F45";
+  if (v.includes("WATCH")) return CC.amber;
+  if (v.includes("EARLY")) return CC.cyan;
+  return CC.stakeDim;
+}
+
+let _leafletP = null;
+function loadLeaflet() {
+  if (window.L && window.L.map) return Promise.resolve(window.L);
+  if (_leafletP) return _leafletP;
+  _leafletP = new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    js.onload = () => resolve(window.L);
+    js.onerror = () => { _leafletP = null; reject(new Error("map library blocked — hotspot list still live below")); };
+    document.head.appendChild(js);
+  });
+  return _leafletP;
+}
+
+/* Live land-sale scan: one bbox query on the FL cadastral, NO server-side
+   WHERE (times out on 10.8M parcels) — filter recent sales client-side. */
+async function scanLandSales(lat, lng) {
+  const yr = new Date().getFullYear();
+  const mi = 0.75, dlat = mi / 69, dlng = mi / (69 * Math.cos((lat * Math.PI) / 180));
+  const params = new URLSearchParams({
+    geometry: `${lng - dlng},${lat - dlat},${lng + dlng},${lat + dlat}`,
+    geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
+    outFields: "SALE_PRC1,SALE_YR1,SALE_MO1,LND_SQFOOT,DOR_UC,PHY_ADDR1",
+    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "1800", f: "json",
+  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 22000);
+  let feats;
+  try {
+    const r = await fetch(`${FL_CADASTRAL}/query?${params}`, { signal: ctrl.signal });
+    const j = await r.json();
+    feats = j.features || [];
+  } finally { clearTimeout(timer); }
+  const sales = feats.map((ft) => {
+    const c = ft.centroid, p = ft.attributes || {};
+    if (!c) return null;
+    const price = parseFloat(p.SALE_PRC1) || 0, y = parseFloat(p.SALE_YR1) || 0;
+    const acres = (parseFloat(p.LND_SQFOOT) || 0) / 43560;
+    if (!(price > 2000 && acres > 0 && y >= yr - 2)) return null;
+    return { lat: c.y, lng: c.x, price, y, m: p.SALE_MO1, acres, ppa: Math.round(price / acres),
+      addr: String(p.PHY_ADDR1 || "").trim(), vacant: FL_VACANT_UC.includes(String(p.DOR_UC || "").trim()) };
+  }).filter(Boolean);
+  const vac = sales.filter((s) => s.vacant).sort((a, b) => a.ppa - b.ppa);
+  const medPpa = vac.length ? vac[Math.floor(vac.length / 2)].ppa : 0;
+  return { sales, vacCount: vac.length, impCount: sales.length - vac.length, medPpa, parcels: feats.length };
+}
+
+const RADAR_CSS = `
+.ms-map.leaflet-container { background: ${CC.abyss}; font-family: 'JetBrains Mono', monospace; }
+.ms-nogrid.leaflet-container { background-image:
+  linear-gradient(rgba(74,222,158,.055) 1px, transparent 1px),
+  linear-gradient(90deg, rgba(74,222,158,.055) 1px, transparent 1px);
+  background-size: 46px 46px; }
+.ms-wrap { background: transparent; border: none; }
+.ms-blip { position: relative; width: var(--s); height: var(--s); }
+.ms-blip i { position: absolute; inset: 0; border-radius: 50%; background: var(--c); opacity: .16; display: block; }
+.ms-blip b { position: absolute; left: 50%; top: 50%; width: 38%; height: 38%; min-width: 7px; min-height: 7px;
+  transform: translate(-50%, -50%); border-radius: 50%; background: var(--c); box-shadow: 0 0 9px var(--c); display: block; }
+.ms-hot i { animation: ms-ping 2.2s ease-out infinite; }
+.ms-on b { outline: 2px solid #fff; outline-offset: 1px; }
+@keyframes ms-ping { 0% { transform: scale(.5); opacity: .5; } 75% { transform: scale(1.3); opacity: 0; } 100% { transform: scale(1.3); opacity: 0; } }
+.ms-tip { background: ${CC.void} !important; border: 1px solid ${CC.edgeLit} !important; color: ${CC.stake} !important;
+  font-family: 'JetBrains Mono', monospace !important; font-size: 11px !important; border-radius: 4px !important;
+  box-shadow: 0 4px 14px rgba(0,0,0,.5) !important; }
+.ms-tip::before { display: none !important; }
+.ms-chip { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; cursor: pointer; padding: 5px 11px;
+  border-radius: 4px; border: 1px solid ${CC.edge}; background: ${CC.moss}; color: ${CC.stake};
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .04em; transition: border-color .12s; }
+.ms-chip:hover { border-color: ${CC.phosphor}; }
+.ms-scroll { scrollbar-width: thin; scrollbar-color: ${CC.edge} transparent; }
+@media (prefers-reduced-motion: reduce) { .ms-hot i { animation: none !important; } }
+`;
+
+function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data, update, lotFind }) {
+  const mapEl = React.useRef(null);
+  const mapRef = React.useRef(null);
+  const refreshLotsRef = React.useRef(() => {});
+  const [ready, setReady] = useState(false);
+  const [mapErr, setMapErr] = useState("");
+  const [tilesDead, setTilesDead] = useState(false);
+  const [baseMode, setBaseMode] = useState("auto"); // auto = dark radar wide, satellite at street zoom
+  const [zoom, setZoom] = useState(6);
+  const [stFilter, setStFilter] = useState("FL"); // ranked-strip state filter
+  const [sel, setSel] = useState(RADAR_HOTSPOTS.find((c) => c.st === "FL") || RADAR_HOTSPOTS[0]);
+  const [scan, setScan] = useState(null);
+  const [lots, setLots] = useState(null);   // lot-lines fetch status
+  const [card, setCard] = useState(null);   // selected parcel ownership card
+  const [finder, setFinder] = useState(null); // APN/address lot search status
+  const [dossOpen, setDossOpen] = useState(true); // county dossier expanded?
+  const markets = Object.values(history || {}).filter((r) => r && typeof r.lat === "number" && typeof r.lng === "number");
+  const effBase = baseMode === "auto" ? (zoom >= SAT_ZOOM ? "sat" : "dark") : baseMode;
+
+  useEffect(() => {
+    let dead = false;
+    loadLeaflet().then((L) => {
+      if (dead || !mapEl.current || mapRef.current) return;
+      const map = L.map(mapEl.current, { attributionControl: false, zoomControl: false, minZoom: 5, maxZoom: 19 });
+      L.control.zoom({ position: "bottomright" }).addTo(map);
+      map.fitBounds(RADAR_BOUNDS.FL);
+      RADAR_STATES.forEach((st2) => {
+        const rings = (ST_OUTLINES[st2] || []).map((rg) => rg.map(([x, y]) => [y, x]));
+        if (rings.length) L.polygon(rings, { color: CC.phosphorDim, weight: 1.2, fill: false, opacity: 0.75, interactive: false }).addTo(map);
+      });
+      mapRef.current = { L, map, tiles: null, labels: null, canvas: L.canvas({ padding: 0.3 }),
+        lotLayer: L.layerGroup().addTo(map), scanLayer: L.layerGroup().addTo(map),
+        hotLayer: L.layerGroup().addTo(map), histLayer: L.layerGroup().addTo(map),
+        findLayer: L.layerGroup().addTo(map),
+        lotCtrl: null, lotTimer: null, selLot: null };
+      map.on("zoomend", () => setZoom(map.getZoom()));
+      map.on("moveend", () => { setZoom(map.getZoom()); refreshLotsRef.current(); });
+      window.__msMap = map; // debug/test hook
+      setZoom(map.getZoom());
+      setReady(true);
+      setTimeout(() => map.invalidateSize(), 60);
+    }).catch((e) => setMapErr(String((e && e.message) || e)));
+    return () => { dead = true; if (mapRef.current) { mapRef.current.map.remove(); mapRef.current = null; } };
+  }, []);
+
+  // basemap: dark ops view wide, live satellite at street zoom (auto), or forced
+  useEffect(() => {
+    const m = mapRef.current; if (!ready || !m) return;
+    if (m.tiles) m.map.removeLayer(m.tiles);
+    if (m.labels) { m.map.removeLayer(m.labels); m.labels = null; }
+    const url = effBase === "sat"
+      ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+    m.tiles = m.L.tileLayer(url, { maxZoom: 19, subdomains: "abcd" });
+    m.tiles.on("tileerror", () => setTilesDead(true));
+    m.tiles.on("tileload", () => setTilesDead(false));
+    m.tiles.addTo(m.map);
+    if (effBase === "sat") {
+      m.labels = m.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: 0.9 });
+      m.labels.addTo(m.map);
+    }
+  }, [ready, effBase]);
+
+  // permit-demand hotspot blips
+  useEffect(() => {
+    const m = mapRef.current; if (!ready || !m) return;
+    m.hotLayer.clearLayers();
+    RADAR_HOTSPOTS.forEach((c) => {
+      const px = Math.round(12 + c.volN * 26);
+      const cls = "ms-blip" + (c.score >= 60 ? " ms-hot" : "") + (sel && sel.st === c.st && sel.f === c.f ? " ms-on" : "");
+      const mk = m.L.marker([c.lat, c.lng], {
+        icon: m.L.divIcon({ html: `<div class="${cls}" style="--c:${c.color};--s:${px}px"><i></i><b></b></div>`, className: "ms-wrap", iconSize: [px, px] }),
+        zIndexOffset: c.score * 10,
+      });
+      mk.bindTooltip(`${c.n}, ${c.st} — ${c.score} ${c.tier} · ${c.u25.toLocaleString()} permits '25`, { direction: "top", offset: [0, -px / 2], className: "ms-tip" });
+      mk.on("click", () => setSel(c));
+      m.hotLayer.addLayer(mk);
+    });
+  }, [ready, sel ? sel.st + sel.f : ""]);
+
+  // markets you already deep-scouted (any state) — diamonds from saved history
+  useEffect(() => {
+    const m = mapRef.current; if (!ready || !m) return;
+    m.histLayer.clearLayers();
+    markets.forEach((r) => {
+      const col = verdictHeat(r.verdict);
+      const mk = m.L.circleMarker([r.lat, r.lng], { radius: 6, color: col, weight: 2, fillColor: col, fillOpacity: 0.3 });
+      mk.bindTooltip(`◈ ${r.market} — ${r.score} ${r.verdict || ""} (scouted ${r.scoutedAt || ""})`, { className: "ms-tip", direction: "top" });
+      mk.on("click", () => onSelect(r));
+      m.histLayer.addLayer(mk);
+    });
+  }, [ready, markets.length]);
+
+  const focusHotspot = (c) => {
+    setSel(c);
+    const m = mapRef.current; if (!m) return;
+    m.map.flyTo([c.lat, c.lng], Math.max(m.map.getZoom(), 8), { duration: 0.8 });
+  };
+
+  const runScan = (lat, lng) => {
+    const m = mapRef.current; if (!m) return;
+    const at = lat != null ? { lat, lng } : m.map.getCenter();
+    if (!inFlorida(at.lat, at.lng)) { setScan({ status: "na" }); return; }
+    if (lat == null && m.map.getZoom() < 11) { setScan({ status: "zoom" }); return; }
+    setScan({ status: "loading" });
+    m.scanLayer.clearLayers();
+    scanLandSales(at.lat, at.lng).then((res) => {
+      res.sales.forEach((s) => {
+        const col = s.vacant ? CC.phosphor : CC.stakeDim;
+        const mk = m.L.circleMarker([s.lat, s.lng], { radius: s.vacant ? 6 : 3.5, color: col, weight: 1.5, fillColor: col, fillOpacity: s.vacant ? 0.75 : 0.25 });
+        mk.bindTooltip(`${s.vacant ? "LAND" : "IMPROVED"} · $${s.price.toLocaleString()} · ${s.acres.toFixed(2)} ac · $${s.ppa.toLocaleString()}/ac · ${s.m || "?"}/${s.y}${s.addr ? " · " + s.addr : ""}`, { className: "ms-tip" });
+        m.scanLayer.addLayer(mk);
+      });
+      setScan({ status: "done", ...res });
+    }).catch(() => setScan({ status: "error" }));
+  };
+
+  const scanHotspot = (c) => {
+    const m = mapRef.current; if (!m) { setScan({ status: "error" }); return; }
+    setSel(c);
+    m.map.once("moveend", () => runScan(c.lat, c.lng));
+    m.map.flyTo([c.lat, c.lng], 13, { duration: 1.1 });
+  };
+
+  const clearScan = () => { const m = mapRef.current; if (m) m.scanLayer.clearLayers(); setScan(null); };
+
+  /* ---- lot lines: live viewport query on the statewide cadastral (owners included) ---- */
+  const LOT_STYLE = { color: CC.phosphor, weight: 1, opacity: 0.85, fillColor: CC.phosphor, fillOpacity: 0.04 };
+  const LOT_STYLE_SEL = { color: "#FFE14D", weight: 2.5, opacity: 1, fillColor: "#FFE14D", fillOpacity: 0.12 };
+
+  const closeCard = () => {
+    const m = mapRef.current;
+    if (m && m.selLot) { try { m.selLot.setStyle(LOT_STYLE); } catch (_) {} m.selLot = null; }
+    if (m) m.findLayer.clearLayers();
+    setCard(null);
+  };
+
+  const openLotCard = (ft, latlng, lyr) => {
+    const m = mapRef.current; if (!m) return;
+    m.findLayer.clearLayers();
+    if (m.selLot) { try { m.selLot.setStyle(LOT_STYLE); } catch (_) {} }
+    m.selLot = lyr; try { lyr.setStyle(LOT_STYLE_SEL); } catch (_) {}
+    const p = ft.properties || {};
+    const s = (v) => String(v == null ? "" : v).trim();
+    const acres = (parseFloat(p.LND_SQFOOT) || 0) / 43560;
+    const price = parseFloat(p.SALE_PRC1) || 0;
+    const jv = parseFloat(p.JV) || 0;
+    setCard({
+      lat: latlng.lat, lng: latlng.lng,
+      apn: s(p.PARCEL_ID), owner: s(p.OWN_NAME),
+      mail1: s(p.OWN_ADDR1), mail2: [s(p.OWN_CITY), s(p.OWN_STATE), s(p.OWN_ZIPCD)].filter(Boolean).join(", "),
+      site: [s(p.PHY_ADDR1), s(p.PHY_CITY)].filter(Boolean).join(", "),
+      zip: s(p.PHY_ZIPCD) || s(p.OWN_ZIPCD),
+      county: nearestFLCounty(latlng.lat, latlng.lng),
+      acres, uc: s(p.DOR_UC), ucLabel: dorLabel(p.DOR_UC),
+      vacant: FL_VACANT_UC.includes(s(p.DOR_UC)),
+      jv, lndVal: parseFloat(p.LND_VAL) || 0,
+      salePrice: price, saleYr: parseFloat(p.SALE_YR1) || 0, saleMo: s(p.SALE_MO1),
+      yrBuilt: parseFloat(p.ACT_YR_BLT) || 0,
+      sent: "",
+    });
+  };
+
+  const refreshLots = () => {
+    const m = mapRef.current; if (!m) return;
+    clearTimeout(m.lotTimer);
+    m.lotTimer = setTimeout(async () => {
+      const z = m.map.getZoom();
+      if (z < PARCEL_ZOOM) {
+        if (m.lotCtrl) m.lotCtrl.abort();
+        m.lotLayer.clearLayers(); m.selLot = null;
+        setLots(null);
+        return;
+      }
+      const ctr2 = m.map.getCenter();
+      if (!inFlorida(ctr2.lat, ctr2.lng)) {
+        if (m.lotCtrl) m.lotCtrl.abort();
+        m.lotLayer.clearLayers(); m.selLot = null;
+        setLots({ status: "na" });
+        return;
+      }
+      if (m.lotCtrl) m.lotCtrl.abort();
+      const ctrl = new AbortController(); m.lotCtrl = ctrl;
+      setLots({ status: "loading" });
+      const b = m.map.getBounds();
       const qs = new URLSearchParams({
-        geometry: `${w},${s},${e},${n}`,
+        geometry: `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`,
         geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects",
         outFields: "*", returnGeometry: "true", inSR: "4326", outSR: "4326",
         f: "geojson", resultRecordCount: "1500",
       });
-      if (slim) { qs.set("maxAllowableOffset", "0.00001"); qs.set("geometryPrecision", "6"); }
-      const res = await corsFetch(`${serviceUrl}/query?${qs}`, { signal, proxy });
-      return res.json();
-    };
-    try {
-      let json = await query(true);
-      if (json && json.error) json = await query(false);
-      return (json && json.features) || [];
-    } catch (_) { return []; }   // one failed quadrant shouldn't blank the rest
-  };
-  const W = bounds.getWest(), S = bounds.getSouth(), E = bounds.getEast(), N = bounds.getNorth();
-  if (!split) return run(W, S, E, N);
-  const mx = (W + E) / 2, my = (S + N) / 2;
-  const parts = await Promise.all([
-    run(W, S, mx, my), run(mx, S, E, my),
-    run(W, my, mx, N), run(mx, my, E, N),
-  ]);
-  // Parcels straddling a quadrant seam come back twice — dedupe by parcel id, else by the
-  // first two vertices (adjacent lots can share ONE corner, so a single point isn't enough).
-  const seen = new Set(), out = [];
-  for (const f of parts.flat()) {
-    const p = f.properties || {};
-    let k = p.PARCEL_ID || p.PARCELID || p.PIN || p.OBJECTID || p.FID;
-    if (k === undefined || k === null || k === "") {
-      try { const r = f.geometry.coordinates[0]; k = JSON.stringify(r[0]) + JSON.stringify(r[1]); }
-      catch (_) { out.push(f); continue; }
-    }
-    if (!seen.has(k)) { seen.add(k); out.push(f); }
-  }
-  return out;
-}
-
-const STATE_ABBR = { "Florida": "FL", "Texas": "TX", "Tennessee": "TN", "North Carolina": "NC" };
-
-const getAutoTheme = () => { const h = new Date().getHours(); return (h >= 20 || h < 7) ? "dark" : "light"; };
-
-const GT = {
-  dark: {
-    bg: "#080F0A", card: "rgba(6,15,9,0.97)", glass: "rgba(12,24,16,0.88)",
-    border: "rgba(0,220,100,0.18)", accent: "#00E87A", accentSoft: "#00B85E",
-    text: "#E0F0E7", textDim: "#6B9A7A", badge: "#FF6B35", badgeBg: "rgba(255,107,53,0.15)",
-    input: "rgba(255,255,255,0.06)", inputBorder: "rgba(255,255,255,0.12)",
-    ctrl: "rgba(8,16,11,0.82)", ctrlBorder: "rgba(0,220,100,0.25)", ctrlText: "#E0F0E7",
-  },
-  light: {
-    bg: "#EEF2ED", card: "rgba(255,255,255,0.98)", glass: "rgba(240,245,240,0.92)",
-    border: "rgba(30,120,70,0.18)", accent: "#1A7A46", accentSoft: "#2EAD65",
-    text: "#0C1E13", textDim: "#4A7A5A", badge: "#D4380D", badgeBg: "rgba(212,56,13,0.1)",
-    input: "rgba(0,0,0,0.04)", inputBorder: "rgba(0,0,0,0.14)",
-    ctrl: "rgba(255,255,255,0.88)", ctrlBorder: "rgba(30,120,70,0.2)", ctrlText: "#0C1E13",
-  },
-};
-
-// Normalize county name from Nominatim
-function normCounty(raw) { return (raw || "").replace(/ County$/i, "").replace(/ Parish$/i, "").trim(); }
-
-// Clean up assessor owner-name strings. County data arrives ALL-CAPS with jammed
-// separators ("SMITH,JOHN L", "DOE JOHN &DOE JANE") and joint owners often live in a
-// second field this used to ignore. Splits on &/AND, reorders "LAST, FIRST" (people
-// only — never businesses), title-cases with LLC/JR/II-style tokens kept uppercase,
-// dedupes, and joins co-owners with " & ".
-function formatOwnerName(raw, raw2) {
-  const KEEP = new Set(["LLC","INC","LLP","LP","PLLC","PLC","PA","PC","CO","CORP","TR","HOA","II","III","IV","JR","SR","ETAL","FBO","REV","DBA","USA","FL","TX","TN","NC"]);
-  const BIZ = /\b(LLC|INC|CORP|CORPORATION|COMPANY|TRUST|TRUSTEE|PROPERTIES|HOLDINGS|PARTNERS|INVESTMENTS|ENTERPRISES|BANK|CHURCH|MINISTRIES|ASSOC|ASSOCIATION|HOA|ESTATE|ESTATES|LP|LLP|PLLC|CITY OF|COUNTY|STATE OF|DEPT|AUTHORITY|DISTRICT)\b/i;
-  const tidy = (s) => String(s || "")
-    .replace(/\s*&\s*/g, " & ")        // "JOHN &JANE" / "JOHN& JANE" -> "JOHN & JANE"
-    .replace(/\s+AND\s+/gi, " & ")
-    .replace(/\s*,\s*/g, ", ")         // "SMITH,JOHN" -> "SMITH, JOHN"
-    .replace(/\s+/g, " ")
-    .trim();
-  const titleWord = (w) => {
-    const bare = w.replace(/[^A-Za-z]/g, "").toUpperCase();
-    if (KEEP.has(bare) || bare.length <= 1) return w.toUpperCase();
-    return w.toLowerCase().replace(/(^|[^a-z])([a-z])/g, (m, a, b) => a + b.toUpperCase()); // handles O'Brien, Smith-Jones
-  };
-  const person = (s) => {
-    s = s.trim();
-    if (!BIZ.test(s)) {
-      const m = s.match(/^([^,]+),\s*(.+)$/);              // "SMITH, JOHN L" -> "JOHN L SMITH"
-      if (m && !KEEP.has(m[2].trim().toUpperCase())) s = `${m[2]} ${m[1]}`.trim();
-    }
-    return s.split(" ").map(titleWord).join(" ");
-  };
-  let names = [];
-  [raw, raw2].forEach((r) => {
-    tidy(r).split(" & ").forEach((p) => { if (p.trim()) names.push(person(p)); });
-  });
-  names = names.filter((n, i) => names.findIndex((x) => x.toLowerCase() === n.toLowerCase()) === i); // some counties repeat owner 1 in owner 2
-  return names.join(" & ");
-}
-
-// Extract parcel fields from ArcGIS response (field names vary widely by county)
-function extractParcelFields(props) {
-  if (!props) return {};
-  const pick = (...keys) => {
-    for (const k of keys) {
-      for (const variant of [k, k.toUpperCase(), k.toLowerCase()]) {
-        const v = props[variant];
-        if (v !== undefined && v !== null && String(v).trim() !== "" && String(v) !== "0") return String(v).trim();
-      }
-    }
-    return "";
-  };
-  return {
-    apn:         pick("PARCEL_ID","APN","PIN","PARCELID","FOLIO","ACCOUNT_NUM","ACCT","GPIN","REID","PIN_NUM","PARCEL","ACCOUNT","PROP_ID","GEO_ID","PARCELNO","PARNO","PARID","PARCELNUMB"),
-    owner:       formatOwnerName(
-                   pick("OWNER","OWNER_NAME","OWNERNAME","OWN_NAME","OWNER1","OWNER_FULL","TAXPAYER","NAME","OWNER_FIRST_NAME","OWNNAME1","OWN1"),
-                   pick("OWNER2","OWNER_NAME2","OWNERNAME2","OWN_NAME2","OWNNAME2","OWN2","OWNER_2","CO_OWNER","COOWNER","MAILNAME2","OWNER_NAME_2")
-                 ),
-    address:     pick("SITE_ADDR","SITUS","PROP_ADDR","PROPERTY_ADDRESS","SITE_ADDRESS","LOCATION","ADDRESS","PHY_ADDR","SITUS_ADDR","PROP_LOCATION","PHY_ADDR1","SITEADDRESS","PAR_ADDR","SITE_ADD","PROPADDR"),
-    mailingAddr: pick("MAIL_ADDR","MAILING_ADDRESS","MAIL_ADDRESS","OWNER_ADDR","OWN_ADDR","MAIL_STREET","OWN_ADDR1","OWNER_ADDRESS","MAILADDR"),
-    city:        pick("MAIL_CITY","OWNER_CITY","CITY","CITY_NAME","MAIL_CTY","OWN_CITY","PHY_CITY"),
-    state:       pick("MAIL_STATE","OWNER_STATE","STATE","ST","MAIL_ST","OWN_STATE"),
-    zip:         pick("MAIL_ZIP","OWNER_ZIP","ZIP","ZIPCODE","ZIP_CODE","MAIL_ZIP5","OWN_ZIPCD","PHY_ZIPCD"),
-    acres:       pick("CALC_ACREAGE","ACREAGE","ACRES","LAND_ACRES","GISACRES","LANDAREA","LGL_ACRES","CALC_ACRE","GIS_ACRES","ACREAGE_CA","DEED_ACRES","LEGAL_AREA","DEEDAC","GIS_ACRE")
-                 || (pick("LND_SQFOOT","LAND_SQFT","SQFT_LAND","LANDSQFT") ? sqftToAcres(pick("LND_SQFOOT","LAND_SQFT","SQFT_LAND","LANDSQFT")).toFixed(3) : ""),
-    zoning:      pick("ZONING","ZONE_CODE","ZONING_CODE","LND_USE_CODE","USE_CODE","DOR_UC","LUSE_DESC","PROP_USE"),
-    landValue:   pick("LAND_VALUE","LND_VAL","ASSESSED_VALUE","JV","LAND_ASSESS","LAND_APPRAISED"),
-    totalValue:  pick("TOTAL_VALUE","JUST_VALUE","JV","MARKET_VALUE","ASSESSED_VALUE","TOTAL_ASSESS","APPRAISED","TOT_APPR_VAL","MKT_VAL","PARVAL","TOTAL_VAL","JUST_VAL","TOTALVALUE"),
-    taxYear:     pick("TAX_YEAR","YEAR","ASSESSMENT_YEAR"),
-    taxOwed:     pick("TAX_AMOUNT","TAXES_DUE","TAX_DUE","DELINQUENT","TAXES_OWED","TAX_OWED","DELQ_AMT","DELINQ_AMT"),
-    delinquent:  pick("DELINQUENT","TAX_DELINQUENT","DELINQ","IS_DELINQUENT","TAX_STATUS"),
-    saleDate:    pick("SALE_DATE","LAST_SALE_DATE","DEED_DATE","DATE_OF_SALE","SALES_DATE","SALE_YR1","SALE_YR2"),
-    salePrice:   pick("SALE_PRICE","LAST_SALE","DEED_PRICE","SALES_PRICE","PRICE","SALE_AMT","SALE_PRC1","SALE_PRC2"),
-    legal:       pick("LEGAL_DESC","LEGAL","LEGAL_DESCRIPTION","LEGAL1","PROP_LEGAL","S_LEGAL"),
-    sqft:        pick("BLDG_SQFT","BLDG_SF","LIVING_AREA","HEATED_AREA","TOT_LVG_AREA","SQ_FT"),
-    yearBuilt:   pick("YEAR_BUILT","YR_BUILT","YEAR_BLT","EFFYR"),
-  };
-}
-
-function fmt$(v) {
-  const n = parseFloat(String(v || "").replace(/[^0-9.]/g, ""));
-  return (!isNaN(n) && n > 0) ? "$" + Math.round(n).toLocaleString() : null;
-}
-
-/* ---- Lead CSV/TSV serialization (shared by GIS basket + Pipeline import/export) ---- */
-const LEAD_CSV_HEADERS = ["OwnerName","Phone","MailingAddress","PropertyAddress","APN","County","Zip","Acres","TargetPrice","MyOffer","Status","BuyBox","Source","LastText","LastCall","LastMailer","Created","Notes"];
-function leadToRow(l) {
-  return [l.owner,l.phone,l.mailing,l.address,l.apn,l.county,l.zip,l.acres,l.price,l.offer,l.status,l.buybox,l.source,l.texted,l.called,l.mailed,l.created,l.notes];
-}
-function leadsToCSV(leads) {
-  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  return [LEAD_CSV_HEADERS.join(","), ...leads.map(l => leadToRow(l).map(esc).join(","))].join("\r\n");
-}
-// One tab-separated row (optionally with header) — pastes straight into Excel/Sheets columns
-function leadToTSV(l, withHeader) {
-  const clean = (v) => String(v ?? "").replace(/[\t\r\n]+/g, " ").trim();
-  const row = leadToRow(l).map(clean).join("\t");
-  return withHeader ? LEAD_CSV_HEADERS.join("\t") + "\r\n" + row : row;
-}
-
-/* ---- GIS parcel → Land Command lead ---- */
-// Deterministic id so the same parcel de-dupes in the saved-list basket
-function parcelLeadId(parcel) {
-  const apn = (parcel.fields && parcel.fields.apn) || "";
-  return "gis_" + (apn ? apn.replace(/\s+/g, "") : `${(parcel.lat || 0).toFixed(6)}_${(parcel.lng || 0).toFixed(6)}`);
-}
-function parcelToLead(parcel) {
-  const f = parcel.fields || {};
-  const priceNum = f.totalValue ? String(Math.round(parseFloat(String(f.totalValue).replace(/[^0-9.]/g, "")) || 0)) : "";
-  const delinq = !!(f.delinquent && !["0","false","no","n","","current"].includes(String(f.delinquent).toLowerCase())) ||
-    !!(f.taxOwed && parseFloat(String(f.taxOwed).replace(/[^0-9.]/g, "")) > 0);
-  return {
-    ...emptyLead(),
-    id: parcelLeadId(parcel),
-    lat: parcel.lat, lng: parcel.lng, pstate: parcel.state || "",
-    owner: f.owner || "",
-    apn: f.apn || "",
-    county: parcel.county || "",
-    zip: parcel.zip || "",
-    acres: f.acres ? parseFloat(f.acres).toFixed(4) : "",
-    price: priceNum,
-    address: f.address || parcel.fullAddress || "",
-    mailing: [f.mailingAddr, f.city, f.state, f.zip].filter(Boolean).join(", "),
-    source: "GIS Map",
-    notes: [
-      f.apn && `APN ${f.apn}`,
-      f.zoning && `Zoning: ${f.zoning}`,
-      f.totalValue && fmt$(f.totalValue) && `Assessed ${fmt$(f.totalValue)}`,
-      f.saleDate && `Last sale ${f.saleDate}${fmt$(f.salePrice) ? " " + fmt$(f.salePrice) : ""}`,
-      delinq && "⚠ TAX DELINQUENT",
-      (parcel.lat != null && parcel.lng != null) && `${parcel.lat.toFixed(6)}, ${parcel.lng.toFixed(6)}`,
-    ].filter(Boolean).join(" · "),
-  };
-}
-
-/* ---- ParcelCard — iOS-style slide-up panel ---- */
-function ParcelCard({ parcel, onClose, onAddToPipeline, onToggleSave, onStartDeal, isSaved, theme }) {
-  const T = GT[theme];
-  const [copied, setCopied] = useState(false);
-  const [copiedExcel, setCopiedExcel] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
-  const [minimized, setMinimized] = useState(false);
-  const f = parcel.fields || {};
-  const urls = parcel.urls || {};
-  const isDelinquent = !!(f.delinquent && !["0","false","no","n","","current"].includes(String(f.delinquent).toLowerCase())) ||
-    !!(f.taxOwed && parseFloat(String(f.taxOwed).replace(/[^0-9.]/g, "")) > 0);
-
-  const fieldRow = (label, val, mono) => val ? (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
-      <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: T.textDim, flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 12.5, color: T.text, textAlign: "right", fontFamily: mono ? "'JetBrains Mono',monospace" : "inherit" }}>{val}</span>
-    </div>
-  ) : null;
-
-  const copyInfo = async () => {
-    const lines = [
-      f.apn && `APN: ${f.apn}`, f.owner && `Owner: ${f.owner}`,
-      (f.address || parcel.fullAddress) && `Address: ${f.address || parcel.fullAddress}`, f.acres && `Acres: ${f.acres}`,
-      f.zoning && `Zoning: ${f.zoning}`, f.totalValue && `Value: ${fmt$(f.totalValue)}`,
-      isDelinquent && "STATUS: TAX DELINQUENT",
-    ].filter(Boolean).join("\n");
-    await copyText(lines);
-    setCopied(true); setTimeout(() => setCopied(false), 1800);
-  };
-
-  const copyExcel = async () => {
-    await copyText(leadToTSV(parcelToLead(parcel), false));
-    setCopiedExcel(true); setTimeout(() => setCopiedExcel(false), 1800);
-  };
-
-  const comps = parcel.comps;
-  const acresNum = parseFloat(f.acres) || 0;
-  const tile = (label, value, sub) => (
-    <div style={{ flex: 1, minWidth: 0, background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: "8px 10px" }}>
-      <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: T.textDim }}>{label}</div>
-      <div style={{ fontSize: 15, fontWeight: 800, color: T.text, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
-      {sub ? <div style={{ fontSize: 9.5, color: T.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div> : null}
-    </div>
-  );
-
-  return (
-    <div style={{
-      position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 1000,
-      background: T.card, borderTop: `1px solid ${T.border}`, borderRadius: "20px 20px 0 0",
-      boxShadow: "0 -10px 48px rgba(0,0,0,0.45)", maxHeight: minimized ? 150 : "56vh", overflowY: minimized ? "hidden" : "auto",
-      fontFamily: "'Inter',system-ui,-apple-system,sans-serif", WebkitOverflowScrolling: "touch", transition: "max-height .2s ease",
-    }}>
-      <div style={{ padding: "12px 16px 22px" }}>
-        {/* Header — explicit exit + minimize buttons (no slide-to-dismiss) */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 800, color: T.text, fontFamily: "'Saira Condensed',sans-serif", textTransform: "uppercase", letterSpacing: ".03em", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {f.owner || "Property Parcel"}
-            </div>
-            <div style={{ fontSize: 12, color: T.text, marginTop: 2, lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.address || parcel.fullAddress || `${parcel.lat?.toFixed(5)}, ${parcel.lng?.toFixed(5)}`}</div>
-            <div className="lc-mono" style={{ fontSize: 10.5, color: T.accent, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {parcel.county ? `${parcel.county} County, ${parcel.state}` : parcel.state || ""}{f.apn ? ` · APN ${f.apn}` : ""}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-            <button onClick={() => setMinimized(m => !m)} title={minimized ? "Expand" : "Minimize"} style={{ border: "none", background: T.input, borderRadius: "50%", width: 30, height: 30, cursor: "pointer", color: T.textDim, fontSize: 13 }}>{minimized ? "▲" : "▽"}</button>
-            <button onClick={onClose} title="Close" style={{ border: "none", background: T.input, borderRadius: "50%", width: 30, height: 30, cursor: "pointer", color: T.textDim, fontSize: 17 }}>×</button>
-          </div>
-        </div>
-
-        {/* Work this lead → launch the guided acquisition funnel */}
-        <button onClick={() => onStartDeal && onStartDeal(parcel)} style={{ width: "100%", padding: "12px 0", borderRadius: 13, border: "none", background: T.accent, color: "#fff", fontSize: 13.5, fontWeight: 800, letterSpacing: ".02em", cursor: "pointer", marginBottom: 12 }}>
-          ▶ Work This Lead — Start the Funnel
-        </button>
-
-        {/* Delinquency (only if the parcel data flags it) */}
-        {isDelinquent && (
-          <div style={{ background: T.badgeBg, border: `1px solid ${T.badge}`, borderRadius: 10, padding: "7px 12px", marginBottom: 10, fontSize: 12, fontWeight: 800, color: T.badge, textTransform: "uppercase", letterSpacing: ".04em" }}>
-            ⚠ Tax Delinquent{f.taxOwed && fmt$(f.taxOwed) ? ` · ${fmt$(f.taxOwed)} owed` : ""}
-          </div>
-        )}
-
-        {/* Key stats */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          {tile("Lot Size", acresNum ? acresNum.toFixed(3) + " ac" : "—", acresNum ? Math.round(acresNum * 43560).toLocaleString() + " sf" : "")}
-          {tile("Assessed", fmt$(f.totalValue) || "—", fmt$(f.landValue) ? `land ${fmt$(f.landValue)}` : "")}
-          {tile("Last Sale", fmt$(f.salePrice) || "—", f.saleDate ? String(f.saleDate) : "")}
-        </div>
-
-        {/* COMPS — underwriting engine */}
-        <div style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 14, padding: "11px 13px", marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 800, color: T.text, fontFamily: "'Saira Condensed',sans-serif", textTransform: "uppercase", letterSpacing: ".05em" }}>📊 Sold Comps</span>
-            {comps && comps.unimproved ? <span style={{ fontSize: 9.5, color: T.textDim }}>≤{comps.radius}mi · acreage-matched</span> : null}
-          </div>
-          {!comps ? (
-            <div style={{ fontSize: 12, color: T.textDim, padding: "4px 0", animation: "gpulse 1.2s infinite" }}>◌ Pulling recent sales nearby…</div>
-          ) : comps.unsupported ? (
-            <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>On-the-fly comps run on Florida parcels today (FL's data carries sale price + date). Other states need a sales feed — ask to wire one in.</div>
-          ) : comps.timeout ? (
-            <div style={{ fontSize: 11.5, color: T.textDim, lineHeight: 1.5 }}>The Florida parcel service was slow — comps didn't load. Re-tap the lot to retry.</div>
-          ) : (
-            <CompsColumns res={comps} pal={{ accent: T.accent, dim: T.textDim, text: T.text, line: T.border, panel: T.card, hot: T.glass }} />
-          )}
-        </div>
-
-        {/* Tax · Delinquency · Auctions */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 12 }}>
-          {[["⚖ Taxes & Delinquency", urls.taxCollector], ["🔨 Tax-Deed Auctions", urls.auction], ["Property Appraiser", urls.assessor], ["County GIS", urls.gis]].map(([label, href]) =>
-            href && href !== "#" ? (
-              <a key={label} href={href} target="_blank" rel="noreferrer" style={{ padding: "8px 10px", borderRadius: 10, background: T.input, border: `1px solid ${T.border}`, color: T.accent, fontSize: 11, fontWeight: 600, textDecoration: "none", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>↗ {label}</a>
-            ) : null)}
-        </div>
-
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <button onClick={onToggleSave} style={{ flex: 1, padding: "11px 0", borderRadius: 13, border: `1px solid ${isSaved ? T.accentSoft : T.border}`, background: isSaved ? T.accentSoft : T.input, color: isSaved ? "#fff" : T.text, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{isSaved ? "★ Saved" : "☆ Save to List"}</button>
-          <button onClick={onAddToPipeline} style={{ flex: 1.4, padding: "11px 0", borderRadius: 13, border: "none", background: T.accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>+ Add to Pipeline</button>
-        </div>
-
-        {/* Collapsible details */}
-        <button onClick={() => setShowDetails((s) => !s)} style={{ width: "100%", padding: "8px 0", borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", color: T.textDim, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
-          {showDetails ? "▾ Hide details" : "▸ More details, mailing & copy"}
-        </button>
-        {showDetails && (
-          <div style={{ marginTop: 10 }}>
-            <div style={{ marginBottom: 10 }}>
-              {fieldRow("Zoning / Use", f.zoning)}
-              {fieldRow("Year Built", f.yearBuilt)}
-              {fieldRow("Owner Mailing", [f.mailingAddr, f.city, f.state, f.zip].filter(Boolean).join(", ") || null)}
-              {fieldRow("Legal", f.legal)}
-              {fieldRow("Coordinates", `${parcel.lat?.toFixed(6)}, ${parcel.lng?.toFixed(6)}`, true)}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={copyExcel} style={{ flex: 1, padding: "10px 0", borderRadius: 12, border: `1px solid ${T.border}`, background: T.input, color: T.text, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{copiedExcel ? "Copied ✓" : "⊞ Copy for Excel"}</button>
-              <button onClick={copyInfo} style={{ flex: 1, padding: "10px 0", borderRadius: 12, border: `1px solid ${T.border}`, background: T.input, color: T.text, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy Details"}</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ---- GISTab ---- */
-function GISTab({ data, update, onStartDeal }) {
-  const mapRef = React.useRef(null);
-  const mapObjRef = React.useRef(null);
-  const parcelLayerRef = React.useRef(null);   // all lot outlines in view
-  const highlightRef = React.useRef(null);     // the selected (illuminated) lot
-  const pinRef = React.useRef(null);
-  const viewAbortRef = React.useRef(null);     // aborts stale viewport parcel fetches
-  const moveTimerRef = React.useRef(null);     // debounce for moveend
-  const loaderRef = React.useRef(null);        // exposes the in-effect viewport loader
-  const selectAtRef = React.useRef(null);      // exposes the in-effect parcel selector (for search)
-  const ctrlRef = React.useRef({});            // fresh state for map event handlers
-
-  const [theme, setTheme] = React.useState("dark");
-  const [mapReady, setMapReady] = React.useState(false);
-  const [loading, setLoading] = React.useState(false);
-  const [selected, setSelected] = React.useState(null);
-  const [rotation, setRotation] = React.useState(0);
-  const [stateFilter, setStateFilter] = React.useState("FL");
-  const [selectedCounty, setSelectedCounty] = React.useState("");
-  const [zoom, setZoom] = React.useState(7);
-  const [showParcels, setShowParcels] = React.useState(true);
-  const [fetchingParcels, setFetchingParcels] = React.useState(false);
-  const [error, setError] = React.useState(null);
-  const [basketOpen, setBasketOpen] = React.useState(false);
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const [proxyTest, setProxyTest] = React.useState("");   // "" | "testing" | "ok" | "fail"
-  const [toast, setToast] = React.useState("");
-  const [searchQ, setSearchQ] = React.useState("");
-  const [searching, setSearching] = React.useState(false);
-
-  const PARCEL_ZOOM = 15;   // show lot outlines at this zoom and deeper
-  const T = GT[theme];
-  const isMobile = useIsMobile();
-  const saved = data.gisSaved || [];
-  const isSaved = !!(selected && saved.some(l => l.id === parcelLeadId(selected)));
-  ctrlRef.current = { stateFilter, showParcels, proxy: (data.settings && data.settings.gisProxy) || "" };   // keep map handlers reading fresh values
-
-  const countyNames = React.useMemo(() => Object.keys(GIS_COUNTIES[stateFilter] || {}), [stateFilter]);
-
-  const STATE_CENTERS = { FL: [27.8, -81.5, 7], TX: [31.5, -99.3, 6], TN: [35.8, -86.4, 7], NC: [35.5, -79.4, 7] };
-
-  React.useEffect(() => {
-    let mounted = true;
-    loadLeaflet().then((L) => {
-      if (!mounted || !mapRef.current) return;
-      const [lat, lng, z] = STATE_CENTERS[stateFilter] || [30, -85, 7];
-
-      const map = L.map(mapRef.current, {
-        center: [lat, lng], zoom: z,
-        zoomControl: false, attributionControl: false,
-        rotate: true, rotateControl: false, touchRotate: false,
-      });
-      mapObjRef.current = map;
-
-      // Satellite base
-      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 21 }).addTo(map);
-      // Labels
-      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 21, opacity: 0.85 }).addTo(map);
-
-      // Lot-outline layer — every parcel in view (canvas for performance), each one clickable
-      parcelLayerRef.current = L.geoJSON(null, {
-        renderer: L.canvas({ padding: 0.5 }),
-        style: { color: "#00E87A", weight: 1, fillColor: "#00E87A", fillOpacity: 0.04 },
-        onEachFeature: (feat, layer) => {
-          layer.on("click", (ev) => { L.DomEvent.stopPropagation(ev); selectAt(ev.latlng, feat); });
-        },
-      }).addTo(map);
-
-      // Highlight layer — the single selected lot, illuminated (SVG so CSS can make it glow)
-      highlightRef.current = L.geoJSON(null, {
-        style: { color: "#FFE000", weight: 4.5, fillColor: "#FFE000", fillOpacity: 0.32, className: "lc-parcel-sel" },
-      }).addTo(map);
-
-      // Unified selection — used by both direct lot clicks and empty-area point queries
-      async function selectAt(latlng, presetFeat) {
-        if (!mounted) return;
-        const { lat, lng } = latlng;
-        setSelected(null); setError(null); setLoading(true);
-
-        if (pinRef.current) pinRef.current.remove();
-        pinRef.current = L.marker([lat, lng], {
-          icon: L.divIcon({
-            html: `<div style="width:14px;height:14px;border-radius:50%;background:#00E87A;border:2.5px solid #fff;box-shadow:0 0 10px #00E87A99;"></div>`,
-            iconSize: [14, 14], iconAnchor: [7, 7], className: "",
-          }),
-        }).addTo(map);
-
-        const stGuess = ctrlRef.current.stateFilter || null;
-        const same = (prev) => prev && prev.lat === lat && prev.lng === lng;
-
-        // Direct lot click: owner/APN/acreage are ALREADY on the clicked feature — show the
-        // card and start comps IMMEDIATELY. The geocode (address/county/links) merges in
-        // when it returns instead of blocking the card for seconds.
-        if (presetFeat) {
-          if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(presetFeat); }
-          if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
-          const pf = extractParcelFields(presetFeat.properties);
-          if (mounted) { setSelected({ lat, lng, zip: "", county: "", state: stGuess, urls: {}, fullAddress: "", fields: pf, hasFeat: true }); setLoading(false); }
-          loadComps(lat, lng, stGuess, pf);
-        }
-
-        // Empty-area click: run the parcel point-query CONCURRENTLY with the geocode using
-        // the current state's service (clicking outside the selected state is the rare case,
-        // corrected below once the geocode names the true state).
-        let featP = null;
-        if (!presetFeat && stGuess && GIS_STATE_PARCELS[stGuess] && ctrlRef.current.showParcels) {
-          featP = queryArcGISParcel(GIS_STATE_PARCELS[stGuess], lat, lng, ctrlRef.current.proxy);
-        }
-
-        try {
-          const geo = await reverseGeocode(lat, lng, 18);
-          const stateName = geo?.address?.state || "";
-          const st = STATE_ABBR[stateName] || stGuess || null;
-          const rawCounty = normCounty(geo?.address?.county || geo?.address?.state_district || "");
-          const countyData = st ? GIS_COUNTIES[st]?.[rawCounty] : null;
-          const urls = getCountyUrls(st || stGuess, rawCounty, countyData?.slug || "");
-          const base = { zip: geo?.address?.postcode || "", county: rawCounty, state: st, urls, fullAddress: buildAddress(geo) };
-
-          if (presetFeat) {
-            if (mounted) setSelected(prev => same(prev) ? { ...prev, ...base } : prev);
-            if (st !== stGuess) loadComps(lat, lng, st, extractParcelFields(presetFeat.properties));  // guess was wrong — redo comps under the true state
-            return;
-          }
-
-          // Empty-area: show the card with the address now; parcel record fills in as it lands
-          if (mounted) { setSelected({ lat, lng, ...base, fields: {}, hasFeat: false }); setLoading(false); }
-          let feat = null;
-          if (featP && st === stGuess) feat = await featP;
-          else {
-            const serviceUrl = (st && GIS_STATE_PARCELS[st]) || (st ? GIS_PARCEL_SERVICES[`${st}_${rawCounty}`] : null);
-            if (serviceUrl && ctrlRef.current.showParcels) feat = await queryArcGISParcel(serviceUrl, lat, lng, ctrlRef.current.proxy);
-          }
-          let qf = {};
-          if (feat && mounted) {
-            if (highlightRef.current) { highlightRef.current.clearLayers(); highlightRef.current.addData(feat); }
-            if (parcelLayerRef.current) parcelLayerRef.current.setStyle({ opacity: 0.18, fillOpacity: 0.008 });
-            qf = extractParcelFields(feat.properties);
-            setSelected(prev => same(prev) ? { ...prev, fields: qf, hasFeat: true } : prev);
-          }
-          loadComps(lat, lng, st, qf);
-        } catch (_) {
-          if (mounted) { if (!presetFeat) setError("Could not load parcel data — check your connection."); setLoading(false); }
-        }
-      }
-
-      // Async comps load — fills selected.comps without blocking the card
-      function loadComps(lat, lng, st, fields) {
-        const acres = parseFloat(fields && fields.acres) || 0;
-        const same = (prev) => prev && prev.lat === lat && prev.lng === lng;
-        if (!COMP_CONFIG[st]) { if (mounted) setSelected(prev => same(prev) ? { ...prev, comps: { unsupported: true } } : prev); return; }
-        fetchComps(lat, lng, acres, st, ctrlRef.current.proxy).then((res) => {
-          if (mounted) setSelected(prev => same(prev) ? { ...prev, comps: res } : prev);
-        });
-      }
-
-      // Load every lot outline within the current viewport (debounced on move; statewide service)
-      async function loadParcelsInView() {
-        if (!mounted) return;
-        const z = map.getZoom();
-        if (!ctrlRef.current.showParcels || z < PARCEL_ZOOM) {
-          parcelLayerRef.current && parcelLayerRef.current.clearLayers();
-          setFetchingParcels(false);
-          return;
-        }
-        const st = ctrlRef.current.stateFilter;
-        const serviceUrl = GIS_STATE_PARCELS[st] || null;
-        if (!serviceUrl) { parcelLayerRef.current && parcelLayerRef.current.clearLayers(); setFetchingParcels(false); return; }
-        if (viewAbortRef.current) viewAbortRef.current.abort();
-        const ac = new AbortController(); viewAbortRef.current = ac;
-        setFetchingParcels(true);
-        // Quadrant-split at the wide zooms (15–16) where the viewport holds the most lots;
-        // at 17+ the view is small enough that a single query is fastest.
-        const feats = await queryArcGISParcelsInBounds(serviceUrl, map.getBounds(), ac.signal, ctrlRef.current.proxy, z <= 16);
-        if (ac.signal.aborted || !mounted) return;
-        if (parcelLayerRef.current) { parcelLayerRef.current.clearLayers(); if (feats.length) parcelLayerRef.current.addData(feats); }
-        setFetchingParcels(false);
-      }
-      loaderRef.current = loadParcelsInView;
-      selectAtRef.current = selectAt;
-
-      function scheduleParcelLoad() {
-        if (moveTimerRef.current) clearTimeout(moveTimerRef.current);
-        moveTimerRef.current = setTimeout(loadParcelsInView, 300);
-      }
-
-      map.on("zoomend", () => { if (mounted) setZoom(map.getZoom()); });
-      map.on("moveend", scheduleParcelLoad);
-      map.on("click", (ev) => selectAt(ev.latlng, null));
-
-      if (mounted) setMapReady(true);
-    }).catch(() => { if (mounted) setError("Map library failed to load. Check your internet connection."); });
-
-    return () => {
-      mounted = false;
-      if (moveTimerRef.current) clearTimeout(moveTimerRef.current);
-      if (viewAbortRef.current) viewAbortRef.current.abort();
-      if (mapObjRef.current) { mapObjRef.current.remove(); mapObjRef.current = null; }
-      _leafletLoading = null;
-    };
-  }, []); // eslint-disable-line
-
-  // NOTE: leaflet-rotate breaks Leaflet's animated moves (flyTo/animated setView/zoomIn
-  // all no-op with the rotate plugin), so all map movement uses setView({animate:false}).
-  const flyToCounty = (name) => {
-    setSelectedCounty(name);
-    const d = name ? GIS_COUNTIES[stateFilter]?.[name] : null;
-    if (d) mapObjRef.current?.setView([d.lat, d.lng], 15, { animate: false });
-  };
-
-  const flyToState = (st) => {
-    ctrlRef.current.stateFilter = st;
-    setStateFilter(st);
-    setSelectedCounty("");
-    highlightRef.current?.clearLayers();
-    parcelLayerRef.current?.clearLayers();
-    const [lat, lng, z] = STATE_CENTERS[st] || [30, -85, 7];
-    mapObjRef.current?.setView([lat, lng], z, { animate: false });
-  };
-
-  // Search the map by street address or parcel APN → fly in close + open the lot card
-  const flyAndSelect = (lat, lng, feat) => {
-    mapObjRef.current?.setView([lat, lng], 18, { animate: false });
-    setTimeout(() => selectAtRef.current && selectAtRef.current({ lat, lng }, feat || null), 60);
-  };
-  const runSearch = async () => {
-    const q = searchQ.trim();
-    if (!q || searching) return;
-    setSearching(true); setError(null);
-    const proxy = (data.settings && data.settings.gisProxy) || "";
-    const addressy = /[a-z]{3,}/i.test(q) && (/,/.test(q) || /\d+\s+[a-z]/i.test(q) ||
-      /\b(st|ave|rd|dr|blvd|ln|ct|way|hwy|pkwy|cir|pl|ter|trl|street|avenue|road|drive|lane|court|circle|place|trail|highway|parkway)\b/i.test(q));
-    // Look the APN up across all four statewide services in parallel; switch states on a hit
-    const tryAPN = async () => {
-      const order = [stateFilter, ...["FL","TX","TN","NC"].filter(s => s !== stateFilter)];
-      const hits = await Promise.all(order.map(async (st) => {
-        const svc = GIS_STATE_PARCELS[st], fld = GIS_STATE_APN_FIELD[st];
-        if (!svc || !fld) return null;
-        try {
-          const where = `${fld}='${q.replace(/'/g, "''")}'`;
-          const res = await corsFetch(`${svc}/query?where=${encodeURIComponent(where)}&outFields=*&returnGeometry=true&outSR=4326&f=geojson&resultRecordCount=1`, { timeout: 12000, proxy });
-          const j = await res.json();
-          return (j.features && j.features[0]) ? { st, feat: j.features[0] } : null;
-        } catch (_) { return null; }
-      }));
-      const hit = hits.find(Boolean);
-      if (!hit) return false;
-      if (hit.st !== stateFilter) { ctrlRef.current.stateFilter = hit.st; setStateFilter(hit.st); setSelectedCounty(""); }
-      const c = featCenter(hit.feat);
-      if (!c) return false;
-      flyAndSelect(c[0], c[1], hit.feat);
-      return true;
-    };
-    const tryAddress = async () => {
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1&countrycodes=us`, { headers: { "Accept-Language": "en" }, signal: AbortSignal.timeout(8000) });
-        const arr = await res.json();
-        if (!arr || !arr[0]) return false;
-        flyAndSelect(parseFloat(arr[0].lat), parseFloat(arr[0].lon), null);
-        return true;
-      } catch (_) { return false; }
+        const r = await fetch(`${FL_CADASTRAL}/query?${qs}`, { signal: ctrl.signal });
+        const j = await r.json();
+        if (ctrl.signal.aborted) return;
+        const feats = j.features || [];
+        m.lotLayer.clearLayers(); m.selLot = null;
+        m.lotLayer.addLayer(m.L.geoJSON({ type: "FeatureCollection", features: feats }, {
+          renderer: m.canvas, style: LOT_STYLE,
+          onEachFeature: (f2, lyr) => lyr.on("click", (e) => openLotCard(f2, e.latlng, lyr)),
+        }));
+        setLots({ status: "done", count: feats.length });
+      } catch (e) {
+        if (!ctrl.signal.aborted) setLots({ status: "error" });
+      }
+    }, 350);
+  };
+  refreshLotsRef.current = refreshLots;
+
+  /* ---- find a specific lot by APN or street address → fly + owner card ---- */
+  const findLot = async (qRaw) => {
+    const m = mapRef.current; if (!m) return;
+    const q = String(qRaw || "").trim();
+    if (!q) return;
+    setFinder({ status: "loading" });
+    try {
+      let feat = null;
+      const isAddress = /^\d+\s+[A-Za-z]/.test(q) || /\b(rd|road|st|street|ave|avenue|dr|drive|ln|lane|blvd|hwy|way|ct|court|cir|circle|ter|terrace|trl|trail|pkwy|loop)\b/i.test(q);
+      if (!isAddress) {
+        // APN — exact match on the indexed parcel id; try as-typed and digits-only forms
+        const esc = (s) => s.replace(/'/g, "''");
+        const cands = [...new Set([q.toUpperCase(), q, q.replace(/[^0-9A-Za-z]/g, "").toUpperCase()])].filter(Boolean);
+        for (const c of cands) {
+          const qs = new URLSearchParams({ where: `PARCEL_ID='${esc(c)}'`, outFields: "*", returnGeometry: "true", outSR: "4326", f: "geojson", resultRecordCount: "1" });
+          const r = await fetch(`${FL_CADASTRAL}/query?${qs}`);
+          const j = await r.json();
+          if (j.features && j.features.length) { feat = j.features[0]; break; }
+        }
+        if (!feat) throw new Error("APN not on the FL roll — check the number (use your county's format, dashes included).");
+      } else {
+        // address → geocode → parcel under that point.
+        // ArcGIS World Geocoder first (CORS ✓, exact US street matches; Census geocoder
+        // is CORS-blocked in browsers, and Nominatim fuzzy-matches missing roads to the
+        // wrong city — so Nominatim is fallback only).
+        const nq = /florida|\bfl\b/i.test(q) ? q : q + ", FL";
+        let px = null, py = null;
+        try {
+          const cr = await fetch(`https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?SingleLine=${encodeURIComponent(nq)}&f=json&maxLocations=1&outFields=Match_addr`);
+          const cj = await cr.json();
+          const hit = cj && cj.candidates && cj.candidates[0];
+          if (hit && hit.score >= 80) { px = hit.location.x; py = hit.location.y; }
+        } catch (_) { /* fall through to Nominatim */ }
+        if (px == null) {
+          const gr = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(nq)}`);
+          const gj = await gr.json();
+          if (!gj || !gj.length) throw new Error("Address not found — check spelling or add the ZIP.");
+          px = parseFloat(gj[0].lon); py = parseFloat(gj[0].lat);
+        }
+        // NOTE: point/tiny-envelope queries hang or 400 on this service — use the proven
+        // viewport-shaped query (~200m box, count 1500) and pick the parcel client-side.
+        const d = 0.002;
+        const qs = new URLSearchParams({ geometry: `${px - d},${py - d},${px + d},${py + d}`, geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outFields: "*", returnGeometry: "true", outSR: "4326", f: "geojson", resultRecordCount: "1500" });
+        const r = await fetch(`${FL_CADASTRAL}/query?${qs}`);
+        const j = await r.json();
+        const feats = j.features || [];
+        if (!feats.length) throw new Error("No parcels around that address — try its APN instead.");
+        // Several polygons can contain the point (HOA tracts overlap house lots) — take the smallest
+        const containing = feats.filter((f2) => featureContains(f2, px, py));
+        if (containing.length) {
+          const areaOf = (f2) => {
+            const sq = parseFloat((f2.properties || {}).LND_SQFOOT) || 0;
+            if (sq > 0) return sq;
+            const g2 = f2.geometry, ring = g2 && (g2.type === "Polygon" ? g2.coordinates[0] : g2.type === "MultiPolygon" ? g2.coordinates[0][0] : null);
+            if (!ring) return Infinity;
+            let xs = ring.map((p2) => p2[0]), ys = ring.map((p2) => p2[1]);
+            return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys)) * 1e10;
+          };
+          feat = containing.sort((a, b) => areaOf(a) - areaOf(b))[0];
+        }
+        if (!feat) { // geocode landed on the road — take the nearest lot
+          let bd = Infinity;
+          feats.forEach((f2) => {
+            const c = featureRoughCenter(f2); if (!c) return;
+            const dd = (c[0] - px) * (c[0] - px) + (c[1] - py) * (c[1] - py);
+            if (dd < bd) { bd = dd; feat = f2; }
+          });
+        }
+        if (!feat) throw new Error("No parcel under that address — try its APN instead.");
+      }
+      const gl = m.L.geoJSON(feat, { style: LOT_STYLE_SEL, interactive: false });
+      const ctr = gl.getBounds().getCenter();
+      openLotCard(feat, ctr, null);       // clears findLayer, fills the owner card
+      m.findLayer.addLayer(gl);           // then drop the yellow highlight on the lot
+      setFinder(null);
+      m.map.setView(ctr, Math.max(m.map.getZoom(), 17), { animate: false }); // teleport — flyTo gets cancelled by any user drag mid-flight
+    } catch (e) {
+      setFinder({ status: "error", msg: String((e && e.message) || e) });
+      setTimeout(() => setFinder((f) => (f && f.status === "error" ? null : f)), 7000);
+    }
+  };
+
+  useEffect(() => {
+    if (ready && lotFind && lotFind.seq && lotFind.q) findLot(lotFind.q);
+  }, [ready, lotFind ? lotFind.seq : 0]);
+
+  const cardLeadId = (c) => "gis_" + (c.apn ? c.apn.replace(/\s+/g, "") : `${c.lat.toFixed(6)}_${c.lng.toFixed(6)}`);
+  const cardInPipeline = card && data && (data.leads || []).some((l) => l.id === cardLeadId(card));
+  const sendToPipeline = () => {
+    if (!card || !update || !data || cardInPipeline) return;
+    const saleTxt = card.salePrice > 2000 && card.saleYr ? ` Last sale $${Math.round(card.salePrice).toLocaleString()} (${card.saleMo ? card.saleMo + "/" : ""}${card.saleYr}).` : "";
+    const lead = {
+      ...emptyLead(), id: cardLeadId(card),
+      owner: card.owner, apn: card.apn, county: card.county, zip: card.zip,
+      acres: card.acres > 0 ? card.acres.toFixed(3) : "",
+      price: card.jv > 0 ? String(Math.round(card.jv)) : "",
+      address: card.site, mailing: [card.mail1, card.mail2].filter(Boolean).join(", "),
+      source: "Market Radar map", lat: card.lat, lng: card.lng, pstate: "FL",
+      notes: `${card.ucLabel || ""}${card.vacant ? " (VACANT)" : ""}.${saleTxt} Pulled live from FL cadastral.`.trim(),
     };
-    try {
-      const ok = addressy ? (await tryAddress() || await tryAPN()) : (await tryAPN() || await tryAddress());
-      if (!ok) setError(`No match for “${q}” — try a full street address or exact APN.`);
-    } catch (_) { setError("Search failed — check your connection."); }
-    setSearching(false);
+    update({ ...data, leads: [lead, ...(data.leads || [])] });
+    setCard({ ...card, sent: "ok" });
   };
 
-  const rotate = (delta) => {
-    const nr = (rotation + delta + 360) % 360;
-    setRotation(nr);
-    const map = mapObjRef.current;
-    if (map?.setBearing) map.setBearing(nr);
-    else if (mapRef.current) { mapRef.current.style.transform = `rotate(${nr}deg)`; mapRef.current.style.transformOrigin = "center"; }
-  };
-
-  const resetNorth = () => {
-    setRotation(0);
-    const map = mapObjRef.current;
-    if (map?.setBearing) map.setBearing(0);
-    else if (mapRef.current) mapRef.current.style.transform = "";
-  };
-
-  const addToPipeline = () => {
-    if (!selected) return;
-    update({ ...data, leads: [{ ...parcelToLead(selected), id: uid() }, ...data.leads] });
-    setToast("Added to Pipeline ✓");
-    setTimeout(() => setToast(""), 2500);
-  };
-
-  // Toggle a parcel in the saved-list basket (persists in data.gisSaved until removed)
-  const toggleSave = () => {
-    if (!selected) return;
-    const id = parcelLeadId(selected);
-    const next = saved.some(l => l.id === id) ? saved.filter(l => l.id !== id) : [parcelToLead(selected), ...saved];
-    update({ ...data, gisSaved: next });
-  };
-
-  const exportSaved = async () => {
-    if (!saved.length) return;
-    const csv = leadsToCSV(saved);
-    await copyText(csv);
-    try {
-      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-      const a = document.createElement("a");
-      a.href = url; a.download = `landcommand-gis-${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    } catch (_) { /* sandbox blocked download — CSV is on the clipboard */ }
-    setToast(`Exported ${saved.length} parcel${saved.length === 1 ? "" : "s"} — CSV copied ✓`);
-    setTimeout(() => setToast(""), 3200);
-  };
-
-  const addAllToPipeline = () => {
-    if (!saved.length) return;
-    const fresh = saved.map(l => ({ ...l, id: uid() }));
-    update({ ...data, leads: [...fresh, ...data.leads], gisSaved: [] });
-    setBasketOpen(false);
-    setToast(`Added ${fresh.length} to Pipeline ✓`);
-    setTimeout(() => setToast(""), 3200);
-  };
-
-  const removeSaved = (id) => update({ ...data, gisSaved: saved.filter(l => l.id !== id) });
-  const clearSaved = () => { update({ ...data, gisSaved: [] }); setBasketOpen(false); };
-
-  const setProxy = (v) => update({ ...data, settings: { ...(data.settings || {}), gisProxy: v } });
-  const testProxy = async () => {
-    setProxyTest("testing");
-    // Canary = Esri's public sample ArcGIS server: very stable + no CORS headers, so it
-    // only succeeds when the proxy actually relays. This tests YOUR proxy plumbing, not
-    // any single county's uptime (county endpoints move/expire over time).
-    const test = "https://sampleserver6.arcgisonline.com/arcgis/rest/services/USA/MapServer/0/query?where=1%3D1&outFields=*&returnGeometry=false&f=json&resultRecordCount=1";
-    try {
-      const res = await corsFetch(test, { timeout: 14000, proxy: (data.settings && data.settings.gisProxy) || "" });
-      const t = await res.text();
-      setProxyTest(/attributes|features|OBJECTID|fieldAliases/i.test(t) ? "ok" : "fail");
-    } catch (_) { setProxyTest("fail"); }
-    setTimeout(() => setProxyTest(""), 7000);
-  };
-
-  const cardOpen = !!selected;
+  const mono = { fontFamily: "'JetBrains Mono', monospace" };
+  const btnStyle = (col, solid) => ({
+    ...mono, fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", cursor: "pointer",
+    padding: "7px 12px", borderRadius: 4, border: `1px solid ${col}`, background: solid ? col : "transparent",
+    color: solid ? CC.abyss : col, whiteSpace: "nowrap",
+  });
 
   return (
-    <div style={{ position: "relative", height: isMobile ? "calc(100dvh - 84px)" : "calc(100vh - 118px)", minHeight: isMobile ? 360 : 520, background: T.bg, borderRadius: 0, overflow: "hidden", border: "none", fontFamily: "'Inter',system-ui,-apple-system,sans-serif" }}>
-      <style>{`
-        .gm .leaflet-pane{z-index:1}.gm .leaflet-overlay-pane{z-index:4}.gm .leaflet-marker-pane{z-index:6}
-        .gcb{backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:opacity .15s}
-        .gcb:hover{opacity:1!important}
-        @keyframes gpulse{0%,100%{opacity:.55}50%{opacity:1}}
-        .lc-parcel-sel{filter:drop-shadow(0 0 4px #FFD400) drop-shadow(0 0 9px rgba(255,212,0,.55));animation:gsel 1.6s ease-in-out infinite}
-        @keyframes gsel{0%,100%{opacity:.85}50%{opacity:1}}
-      `}</style>
+    <div style={{ marginTop: 14, background: CC.void, border: `1px solid ${CC.edge}`, borderRadius: 10, overflow: "hidden", color: CC.stake }}>
+      <style>{RADAR_CSS}</style>
 
-      {/* Map */}
-      <div ref={mapRef} className="gm" style={{ position: "absolute", inset: 0 }} />
-
-      {/* Loading */}
-      {loading && (
-        <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", background: T.glass, border: `1px solid ${T.border}`, borderRadius: 14, padding: "13px 20px", zIndex: 800, display: "flex", alignItems: "center", gap: 10, backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", color: T.text, fontSize: 13, fontWeight: 600, animation: "gpulse 1.2s infinite" }}>
-          <span>📡</span> Querying parcel data…
+      {/* header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${CC.edge}`, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <span style={{ ...mono, fontSize: 10, fontWeight: 700, letterSpacing: ".2em", textTransform: "uppercase", color: CC.phosphorDim }}>◎ Market Radar — FL · TX · NC · TN</span>
+          <span style={{ ...mono, fontSize: 10, color: CC.stakeDim, marginLeft: 10 }}>{RADAR_HOTSPOTS.length} counties live · real permits · lot lines + owners at street zoom (FL){markets.length ? ` · ◈ ${markets.length} scouted` : ""}</span>
         </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div onClick={() => setError(null)} style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: T.badgeBg, border: `1px solid ${T.badge}`, borderRadius: 10, padding: "9px 16px", zIndex: 900, color: T.badge, fontSize: 12, fontWeight: 600, backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", cursor: "pointer" }}>
-          {error} ×
-        </div>
-      )}
-
-      {/* Success toast */}
-      {toast && (
-        <div style={{ position: "absolute", top: 56, left: "50%", transform: "translateX(-50%)", background: T.glass, border: `1px solid ${T.accent}`, borderRadius: 10, padding: "9px 16px", zIndex: 1200, color: T.accent, fontSize: 12.5, fontWeight: 700, backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", boxShadow: "0 6px 20px rgba(0,0,0,0.25)" }}>
-          {toast}
-        </div>
-      )}
-
-      {/* Top bar — state pills (row 1) + county dropdown (row 2) */}
-      <div style={{ position: "absolute", top: 12, left: 12, right: 58, zIndex: 700, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
-        {/* Search — jump to any street address or parcel APN */}
-        <div style={{ display: "flex", gap: 6, width: isMobile ? "100%" : "min(330px, 64vw)" }}>
-          <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
-            placeholder="Search address or APN…" className="gcb"
-            style={{ flex: 1, minWidth: 0, padding: "9px 14px", borderRadius: 18, border: `1px solid ${T.border}`, background: T.glass, color: T.text, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
-          <button onClick={runSearch} title="Search" className="gcb"
-            style={{ flexShrink: 0, width: 38, height: 38, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: searching ? T.ctrl : T.accent, color: searching ? T.ctrlText : "#fff", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {searching ? "…" : "⌕"}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => runScan()} style={btnStyle(CC.phosphor, false)}>⌖ Scan sales in view</button>
+          <button type="button" onClick={() => setBaseMode(baseMode === "auto" ? "dark" : baseMode === "dark" ? "sat" : "auto")} style={btnStyle(CC.cyan, false)}>
+            {baseMode === "auto" ? `Auto · ${effBase === "sat" ? "satellite" : "dark"}` : baseMode === "dark" ? "Dark ops" : "Satellite"}
           </button>
         </div>
-        {/* Compact location selectors (state + county) — small so they don't obstruct the map */}
-        <div style={{ display: "flex", gap: 6, width: isMobile ? "100%" : "min(330px, 64vw)" }}>
-          <select value={stateFilter} onChange={e => flyToState(e.target.value)} className="gcb" title="State"
-            style={{ flexShrink: 0, width: 72, padding: "8px 8px", borderRadius: 16, border: `1px solid ${T.border}`, background: T.glass, color: T.text, fontSize: 12.5, fontWeight: 800, outline: "none", cursor: "pointer", WebkitAppearance: "none", appearance: "none", textAlign: "center" }}>
-            {["FL","TX","TN","NC"].map(st => <option key={st} value={st} style={{ color: "#111", background: "#fff" }}>{st}</option>)}
-          </select>
-          <select value={selectedCounty} onChange={e => flyToCounty(e.target.value)} className="gcb" title="County"
-            style={{ flex: 1, minWidth: 0, padding: "8px 12px", borderRadius: 16, border: `1px solid ${T.border}`, background: T.glass, color: T.text, fontSize: 12.5, fontWeight: 600, outline: "none", cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
-            <option value="">County… ({countyNames.length})</option>
-            {countyNames.map(name => <option key={name} value={name} style={{ color: "#111", background: "#fff" }}>{name} County</option>)}
-          </select>
-        </div>
       </div>
 
-      {/* Data-source / proxy settings */}
-      <button className="gcb" onClick={() => { setSettingsOpen(o => !o); setBasketOpen(false); }} title="Live data source (CORS proxy)" style={{ position: "absolute", top: 12, right: 12, zIndex: 701, width: 38, height: 38, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: (data.settings && data.settings.gisProxy) ? T.accent : T.ctrl, color: (data.settings && data.settings.gisProxy) ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        ⚙
-      </button>
-
-      {/* Basket panel */}
-      {basketOpen && (
-        <div style={{ position: "absolute", top: 58, right: 12, width: "min(340px, calc(100vw - 24px))", maxHeight: "calc(100% - 80px)", overflowY: "auto", zIndex: 1100, background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, boxShadow: "0 14px 44px rgba(0,0,0,0.4)", padding: 14, WebkitOverflowScrolling: "touch" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontSize: 14, fontWeight: 800, color: T.text, fontFamily: "'Saira Condensed',sans-serif", textTransform: "uppercase", letterSpacing: ".05em" }}>Saved Parcels ({saved.length})</span>
-            <button onClick={() => setBasketOpen(false)} style={{ border: "none", background: T.input, borderRadius: "50%", width: 28, height: 28, cursor: "pointer", color: T.textDim, fontSize: 16 }}>×</button>
-          </div>
-          {saved.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: T.textDim, lineHeight: 1.5, padding: "6px 2px 10px" }}>
-              No parcels saved yet. Tap a parcel on the map, then "☆ Save to List" to collect it here. Saved parcels persist until you remove them — then bulk-export as CSV or push them all to the Pipeline.
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
-              {saved.map(l => (
-                <div key={l.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 10px" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.owner || "Unknown owner"}</div>
-                    <div style={{ fontSize: 10.5, color: T.textDim, fontFamily: "'JetBrains Mono',monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {[l.apn && `APN ${l.apn}`, l.county && `${l.county} Co`, l.acres && `${l.acres} ac`].filter(Boolean).join(" · ") || "—"}
-                    </div>
-                  </div>
-                  <button onClick={() => removeSaved(l.id)} title="Remove" style={{ flexShrink: 0, border: "none", background: "transparent", color: T.textDim, fontSize: 16, cursor: "pointer", padding: 4 }}>×</button>
-                </div>
-              ))}
-            </div>
-          )}
-          {saved.length > 0 && (
-            <div style={{ display: "grid", gap: 6 }}>
-              <button onClick={exportSaved} style={{ padding: "10px 0", borderRadius: 12, border: `1px solid ${T.border}`, background: T.input, color: T.text, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>⇩ Export CSV ({saved.length})</button>
-              <button onClick={addAllToPipeline} style={{ padding: "10px 0", borderRadius: 12, border: "none", background: T.accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>+ Add all to Pipeline</button>
-              <button onClick={clearSaved} style={{ padding: "9px 0", borderRadius: 12, border: `1px solid ${T.border}`, background: "transparent", color: T.badge, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Clear list</button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Data-source / proxy panel */}
-      {settingsOpen && (
-        <div style={{ position: "absolute", top: 58, right: 12, width: "min(380px, calc(100vw - 24px))", maxHeight: "calc(100% - 80px)", overflowY: "auto", zIndex: 1100, background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, boxShadow: "0 14px 44px rgba(0,0,0,0.4)", padding: 16, WebkitOverflowScrolling: "touch" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 800, color: T.text, fontFamily: "'Saira Condensed',sans-serif", textTransform: "uppercase", letterSpacing: ".05em" }}>Live Data Source</span>
-            <button onClick={() => setSettingsOpen(false)} style={{ border: "none", background: T.input, borderRadius: "50%", width: 28, height: 28, cursor: "pointer", color: T.textDim, fontSize: 16 }}>×</button>
-          </div>
-          <div style={{ fontSize: 12, color: T.textDim, lineHeight: 1.5, marginBottom: 12 }}>
-            County GIS servers block direct browser access, so lot outlines &amp; owner data need a CORS proxy. Paste your proxy URL below (a free Cloudflare Worker is the reliable option — ask in chat for the code). Leave blank to try direct + public relays.
-          </div>
-          <label style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: T.textDim, display: "block", marginBottom: 5 }}>Proxy URL</label>
-          <input value={(data.settings && data.settings.gisProxy) || ""} onChange={e => setProxy(e.target.value)} placeholder="https://your-worker.workers.dev/?url={url}"
-            style={{ width: "100%", padding: "9px 11px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.input, color: T.text, fontSize: 12, fontFamily: "'JetBrains Mono',monospace", outline: "none", boxSizing: "border-box" }} />
-          <div style={{ fontSize: 10.5, color: T.textDim, marginTop: 6, lineHeight: 1.45 }}>
-            Use <code>{"{url}"}</code> where the encoded target goes, or paste just the base URL and the app appends <code>?url=</code>.
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
-            <button onClick={testProxy} disabled={proxyTest === "testing"} style={{ padding: "9px 16px", borderRadius: 10, border: "none", background: T.accent, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", opacity: proxyTest === "testing" ? 0.7 : 1 }}>
-              {proxyTest === "testing" ? "Testing…" : "Test connection"}
-            </button>
-            {proxyTest === "ok" && <span style={{ fontSize: 12.5, fontWeight: 700, color: T.accent }}>✓ Proxy works — data flowing</span>}
-            {proxyTest === "fail" && <span style={{ fontSize: 12.5, fontWeight: 700, color: T.badge }}>✕ No response — check the URL</span>}
-          </div>
-        </div>
-      )}
-
-      {/* Right controls */}
-      <div style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 700, display: "flex", flexDirection: "column", gap: 6 }}>
-        {/* Saved-parcels basket — sits at the top of the rail, just above the compass */}
-        <button className="gcb" onClick={() => { setBasketOpen(o => !o); setSettingsOpen(false); }} title="Saved parcels" style={{ position: "relative", width: isMobile ? 36 : 40, height: isMobile ? 36 : 40, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: saved.length ? T.accent : T.ctrl, color: saved.length ? "#fff" : T.ctrlText, cursor: "pointer", fontSize: 16, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          ★
-          {saved.length > 0 && <span style={{ position: "absolute", top: -3, right: -3, minWidth: 16, height: 16, padding: "0 3px", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${T.bg}` }}>{saved.length}</span>}
-        </button>
-        {[
-          ["🧭", resetNorth, "Reset north"],
-          ["↺", () => rotate(-15), "Rotate left"],
-          ["↻", () => rotate(15), "Rotate right"],
-          ["+", () => mapObjRef.current?.setZoom(mapObjRef.current.getZoom() + 1, { animate: false }), "Zoom in"],
-          ["−", () => mapObjRef.current?.setZoom(mapObjRef.current.getZoom() - 1, { animate: false }), "Zoom out"],
-        ].filter((_, idx) => !isMobile || idx === 0 || idx >= 3).map(([icon, fn, title]) => (
-          <button key={title} className="gcb" onClick={fn} title={title} style={{ width: isMobile ? 36 : 40, height: isMobile ? 36 : 40, borderRadius: "50%", border: `1px solid ${T.ctrlBorder}`, background: T.ctrl, color: T.ctrlText, cursor: "pointer", fontSize: icon==="🧭"?18:20, fontWeight: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {icon === "🧭" ? <span style={{ transform: `rotate(${-rotation}deg)`, display: "block", transition: "transform .2s" }}>🧭</span> : icon}
+      {/* top hotspots strip — filter by state, ranked within it */}
+      <div className="ms-scroll" style={{ display: "flex", gap: 6, overflowX: "auto", padding: "9px 12px", borderBottom: `1px solid ${CC.edge}`, background: CC.abyss, alignItems: "center" }}>
+        {["FL", "TX", "NC", "TN", "ALL"].map((s) => (
+          <button key={s} type="button" onClick={() => { setStFilter(s); const m = mapRef.current; if (m) m.map.fitBounds(RADAR_BOUNDS[s]); }}
+            style={{ ...mono, flex: "0 0 auto", fontSize: 10, fontWeight: 700, letterSpacing: ".1em", cursor: "pointer", padding: "5px 9px", borderRadius: 4,
+              border: `1px solid ${stFilter === s ? CC.phosphor : CC.edge}`, background: stFilter === s ? CC.mossLit : "transparent", color: stFilter === s ? CC.phosphor : CC.stakeDim }}>{s}</button>
+        ))}
+        <span style={{ width: 1, height: 18, background: CC.edge, flex: "0 0 auto" }} />
+        {RADAR_HOTSPOTS.filter((c) => stFilter === "ALL" || c.st === stFilter).slice(0, 12).map((c, i) => (
+          <button key={c.st + c.f} type="button" className="ms-chip" onClick={() => focusHotspot(c)}
+            style={sel && sel.st === c.st && sel.f === c.f ? { borderColor: c.color, background: CC.mossLit } : undefined}>
+            <span style={{ color: CC.stakeDim }}>{i + 1}</span>
+            <span style={{ width: 8, height: 8, borderRadius: 99, background: c.color, boxShadow: `0 0 6px ${c.color}`, flexShrink: 0 }} />
+            {c.n}{stFilter === "ALL" ? `, ${c.st}` : ""}
+            <span style={{ color: c.color }}>{c.score}</span>
           </button>
         ))}
       </div>
 
-      {/* Bottom chips */}
-      <div style={{ position: "absolute", bottom: cardOpen ? "calc(65vh + 10px)" : 14, left: 12, zIndex: 700, display: "flex", gap: 6, transition: "bottom .3s ease", pointerEvents: "none" }}>
-        <div className="gcb" style={{ background: T.glass, border: `1px solid ${T.border}`, borderRadius: 10, padding: "5px 10px", color: T.textDim, fontSize: 11, fontFamily: "'JetBrains Mono',monospace" }}>
-          {zoom < PARCEL_ZOOM ? "Zoom in to see lot lines" : `Zoom ${zoom}${rotation ? ` · ${rotation}°` : ""}`}
-        </div>
-        {!mapReady && <div className="gcb" style={{ background: T.glass, border: `1px solid ${T.border}`, borderRadius: 10, padding: "5px 10px", color: T.accent, fontSize: 11, animation: "gpulse 1.2s infinite" }}>Loading map…</div>}
-        {fetchingParcels && <div className="gcb" style={{ background: T.glass, border: `1px solid ${T.border}`, borderRadius: 10, padding: "5px 10px", color: T.accent, fontSize: 11, animation: "gpulse 1.2s infinite" }}>◌ Loading lot lines…</div>}
+      {/* map + radar overlay */}
+      <div style={{ position: "relative" }}>
+        <div ref={mapEl} className={"ms-map" + (tilesDead ? " ms-nogrid" : "")} style={{ height: "min(56vh, 520px)", minHeight: 360, zIndex: 0 }} />
+        {mapErr && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: CC.abyss, zIndex: 600 }}>
+            <div style={{ ...mono, fontSize: 12, color: CC.amber, textAlign: "center", padding: 20 }}>⚠ Live map unavailable ({mapErr}).<br />Hotspot rankings and dossiers below still run on real permit data.</div>
+          </div>
+        )}
+        {scan && scan.status === "loading" && (
+          <div style={{ position: "absolute", top: 10, left: 10, zIndex: 600, ...mono, fontSize: 11, color: CC.phosphor, background: "rgba(7,11,10,.85)", border: `1px solid ${CC.edgeLit}`, borderRadius: 4, padding: "6px 12px" }}>
+            ⌖ SCANNING ~1.5 MI OF PARCELS FOR RECENT SALES…
+          </div>
+        )}
+
+        {/* lot finder status */}
+        {finder && (
+          <div style={{ position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: 660, maxWidth: "calc(100% - 20px)", ...mono, fontSize: 11,
+            color: finder.status === "error" ? CC.amber : CC.cyan, background: "rgba(7,11,10,.92)", border: `1px solid ${finder.status === "error" ? CC.amber : CC.edgeLit}`, borderRadius: 4, padding: "6px 12px" }}>
+            {finder.status === "loading" ? "⌖ LOCATING LOT ON THE FL ROLL…" : `⚠ ${finder.msg}`}
+          </div>
+        )}
+
+        {/* lot-lines status */}
+        {ready && !mapErr && (zoom >= 11 || lots) && (
+          <div style={{ position: "absolute", top: scan && scan.status === "loading" ? 44 : 10, left: 10, zIndex: 600, ...mono, fontSize: 10.5, background: "rgba(7,11,10,.85)", border: `1px solid ${CC.edge}`, borderRadius: 4, padding: "5px 10px",
+            color: lots && lots.status === "loading" ? CC.cyan : lots && lots.status === "done" ? CC.phosphor : CC.stakeDim }}>
+            {lots && lots.status === "na" ? "◻ LOT LINES & OWNERS: FLORIDA ONLY (MORE STATES NEXT)"
+              : zoom < PARCEL_ZOOM ? `◻ ZOOM ${PARCEL_ZOOM - Math.floor(zoom)} MORE FOR LOT LINES + OWNERS`
+              : !lots || lots.status === "loading" ? "◻ PULLING LOT LINES…"
+              : lots.status === "error" ? "◻ LOT PULL FAILED — PAN TO RETRY"
+              : lots.count >= 1500 ? `◻ ${lots.count}+ LOTS (CAP) — TIGHTEN VIEW · TAP A LOT FOR THE OWNER`
+              : `◻ ${lots.count} LOTS LIVE · TAP A LOT FOR THE OWNER`}
+          </div>
+        )}
+
+        {/* ownership card — pulled live from the FL statewide cadastral */}
+        {card && (
+          <div className="ms-scroll" style={{ position: "absolute", left: 10, bottom: 10, zIndex: 650, width: "min(330px, calc(100% - 20px))", maxHeight: "80%", overflowY: "auto",
+            background: "rgba(7,11,10,.95)", border: `1px solid ${CC.edgeLit}`, borderRadius: 8, padding: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+              <div style={{ ...mono, fontSize: 9.5, fontWeight: 700, letterSpacing: ".2em", color: CC.phosphorDim }}>OWNER · LIVE COUNTY ROLL</div>
+              <button type="button" onClick={closeCard} style={{ ...mono, background: "none", border: "none", color: CC.stakeDim, fontSize: 14, cursor: "pointer", lineHeight: 1, padding: 0 }}>✕</button>
+            </div>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: CC.stake, marginTop: 6, lineHeight: 1.25 }}>{card.owner || "Owner not listed"}</div>
+            {(card.mail1 || card.mail2) && (
+              <div style={{ fontSize: 11.5, color: CC.stakeDim, marginTop: 3, lineHeight: 1.45 }}>
+                ✉ {card.mail1}{card.mail1 && card.mail2 ? ", " : ""}{card.mail2}
+              </div>
+            )}
+            <div style={{ height: 1, background: CC.edge, margin: "10px 0" }} />
+            <div style={{ display: "grid", gap: 5 }}>
+              {card.site && <div style={{ fontSize: 12, color: CC.stake }}>◻ {card.site}</div>}
+              <div style={{ ...mono, fontSize: 10.5, color: CC.stakeDim }}>APN {card.apn || "—"} · {card.county} Co.</div>
+              <div style={{ fontSize: 12, color: CC.stake }}>
+                {card.acres > 0 ? `${card.acres.toFixed(2)} ac` : "— ac"} · {card.ucLabel || "use unknown"}
+                {card.vacant && <span style={{ ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".1em", color: CC.abyss, background: CC.phosphor, borderRadius: 3, padding: "2px 6px", marginLeft: 7 }}>VACANT LAND</span>}
+                {!card.vacant && card.yrBuilt > 0 && <span style={{ color: CC.stakeDim }}> · built {card.yrBuilt}</span>}
+              </div>
+              {card.salePrice > 2000 && card.saleYr > 0 && (
+                <div style={{ fontSize: 12, color: CC.stake }}>
+                  Last sale <b>${Math.round(card.salePrice).toLocaleString()}</b> <span style={{ color: CC.stakeDim }}>({card.saleMo ? card.saleMo + "/" : ""}{card.saleYr})</span>
+                  {card.acres > 0 && <span style={{ ...mono, color: CC.phosphor }}> · ${Math.round(card.salePrice / card.acres).toLocaleString()}/ac</span>}
+                </div>
+              )}
+              {card.jv > 0 && <div style={{ fontSize: 12, color: CC.stakeDim }}>County just value ${Math.round(card.jv).toLocaleString()}{card.lndVal > 0 && card.lndVal !== card.jv ? ` · land $${Math.round(card.lndVal).toLocaleString()}` : ""}</div>}
+            </div>
+            <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
+              {card.sent === "ok" || cardInPipeline
+                ? <div style={{ ...mono, fontSize: 10.5, color: CC.phosphor, textAlign: "center", border: `1px dashed ${CC.phosphorDim}`, borderRadius: 4, padding: "7px 10px" }}>✓ IN PIPELINE — skip trace &amp; call</div>
+                : <button type="button" onClick={sendToPipeline} style={btnStyle(CC.phosphor, true)}>→ Send owner to pipeline</button>}
+              <div style={{ display: "flex", gap: 6 }}>
+                <a href={g(`${card.owner} ${card.county} County FL`)} target="_blank" rel="noreferrer" style={{ ...btnStyle(CC.cyan, false), flex: 1, textAlign: "center", textDecoration: "none" }}>Google owner ↗</a>
+                <a href={g(`${card.apn} ${card.county} County FL property appraiser`)} target="_blank" rel="noreferrer" style={{ ...btnStyle(CC.amber, false), flex: 1, textAlign: "center", textDecoration: "none" }}>Appraiser ↗</a>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Lot-lines toggle */}
-      <button className="gcb" onClick={() => { const nv=!showParcels; ctrlRef.current.showParcels = nv; setShowParcels(nv); if(!nv){ parcelLayerRef.current?.clearLayers(); highlightRef.current?.clearLayers(); } else loaderRef.current?.(); }} style={{ position: "absolute", bottom: cardOpen ? "calc(65vh + 10px)" : 14, right: 12, zIndex: 700, padding: "6px 13px", borderRadius: 10, border: `1px solid ${T.ctrlBorder}`, background: showParcels ? T.accent : T.ctrl, color: showParcels ? "#fff" : T.ctrlText, fontSize: 11.5, fontWeight: 700, cursor: "pointer", transition: "bottom .3s ease" }}>
-        {showParcels ? "Lot Lines ON" : "Lot Lines OFF"}
-      </button>
-
-
-      {/* Ownership card */}
-      {selected && (
-        <ParcelCard parcel={selected} theme={theme} isSaved={isSaved} onToggleSave={toggleSave} onStartDeal={onStartDeal}
-          onClose={() => { setSelected(null); highlightRef.current?.clearLayers(); parcelLayerRef.current?.setStyle({ opacity: 1, fillOpacity: 0.04 }); if(pinRef.current){pinRef.current.remove();pinRef.current=null;} }}
-          onAddToPipeline={addToPipeline}
-        />
+      {/* land-sale scan readout */}
+      {scan && scan.status !== "loading" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "10px 14px", borderTop: `1px solid ${CC.edge}`, background: CC.abyss }}>
+          {scan.status === "na" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Land-sale scans cover Florida only right now — TX / NC / TN parcel feeds are next.</span>}
+          {scan.status === "zoom" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Zoom into a spot first (or hit “Scan land sales” on a hotspot) — each scan covers ~1.5 mi.</span>}
+          {scan.status === "error" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Scan timed out — the state parcel server hiccuped. Try again.</span>}
+          {scan.status === "done" && (
+            <>
+              <span style={{ ...mono, fontSize: 11.5, color: CC.phosphor, fontWeight: 700 }}>● {scan.vacCount} vacant-land sale{scan.vacCount === 1 ? "" : "s"}</span>
+              {scan.medPpa > 0 && <span style={{ ...mono, fontSize: 11.5, color: CC.stake }}>median ${scan.medPpa.toLocaleString()}/ac</span>}
+              <span style={{ ...mono, fontSize: 11.5, color: CC.stakeDim }}>○ {scan.impCount} improved · {scan.parcels.toLocaleString()} parcels swept · last 2 yrs, ~1.5 mi window</span>
+              {scan.vacCount === 0 && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>No recent land sales in window — tight supply or slow corner. Pan and rescan.</span>}
+            </>
+          )}
+          <button type="button" onClick={clearScan} style={{ ...btnStyle(CC.stakeDim, false), marginLeft: "auto" }}>Clear</button>
+        </div>
       )}
+
+      {/* hotspot dossier — collapsible */}
+      {sel && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderTop: `1px solid ${CC.edge}`, background: CC.abyss, flexWrap: "wrap" }}>
+          {dossOpen ? (
+            <span style={{ ...mono, fontSize: 10, fontWeight: 700, letterSpacing: ".2em", textTransform: "uppercase", color: CC.phosphorDim }}>▙ County dossier</span>
+          ) : (
+            <>
+              <span style={{ width: 9, height: 9, borderRadius: 99, background: sel.color, boxShadow: `0 0 6px ${sel.color}`, flexShrink: 0 }} />
+              <span style={{ ...mono, fontSize: 11.5, fontWeight: 700, color: CC.stake }}>{sel.n} County, {sel.st}</span>
+              <span style={{ ...mono, fontSize: 11.5, fontWeight: 700, color: sel.color }}>{sel.score} · {sel.tier}</span>
+              <span style={{ ...mono, fontSize: 10.5, color: CC.stakeDim }}>{sel.u25.toLocaleString()} permits '25 · {sel.chg >= 0 ? "+" : ""}{sel.chg}% pace</span>
+            </>
+          )}
+          <button type="button" onClick={() => setDossOpen(!dossOpen)} style={{ ...btnStyle(CC.stakeDim, false), marginLeft: "auto", padding: "4px 10px" }}>
+            {dossOpen ? "▾ Minimize" : "▸ Details"}
+          </button>
+        </div>
+      )}
+      {sel && dossOpen && (
+        <div style={{ borderTop: `1px solid ${CC.edge}`, padding: 14, display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", alignItems: "start" }}>
+          <div>
+            <span style={{ ...mono, fontSize: 10, fontWeight: 700, letterSpacing: ".14em", color: sel.color, border: `1px solid ${sel.color}`, borderRadius: 3, padding: "2px 8px" }}>{sel.tier}</span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 8 }}>
+              <span style={{ ...mono, fontSize: 42, fontWeight: 600, color: sel.color, lineHeight: 1 }}>{sel.score}</span>
+              <span className="lc-display" style={{ fontSize: 19, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".03em" }}>{sel.n} County, {sel.st}</span>
+            </div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.55, color: CC.stake, marginTop: 8 }}>{hotspotInsight(sel)}</div>
+          </div>
+          <div>
+            <div style={{ ...mono, fontSize: 10, fontWeight: 700, letterSpacing: ".16em", textTransform: "uppercase", color: CC.phosphorDim, marginBottom: 8 }}>SF permits — builder demand</div>
+            {[["2024", sel.u24], ["2025", sel.u25], ["2026 pace", sel.pace26]].map(([lab, v], i) => {
+              const max = Math.max(sel.u24, sel.u25, sel.pace26, 1);
+              return (
+                <div key={lab} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ ...mono, fontSize: 10.5, color: CC.stakeDim, width: 68, flexShrink: 0 }}>{lab}</span>
+                  <div style={{ flex: 1, height: 12, background: CC.moss, borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${Math.max(2, (v / max) * 100)}%`, height: "100%", background: i === 2 ? sel.color : CC.phosphorDim, opacity: i === 2 ? 1 : 0.7 }} />
+                  </div>
+                  <span style={{ ...mono, fontSize: 11, color: i === 2 ? sel.color : CC.stake, width: 52, textAlign: "right", flexShrink: 0 }}>{v.toLocaleString()}</span>
+                </div>
+              );
+            })}
+            <div style={{ ...mono, fontSize: 10, color: CC.stakeDim, marginTop: 6 }}>momentum {sel.chg >= 0 ? "+" : ""}{sel.chg}% vs '25 · #{stateRank(sel).rank} of {stateRank(sel).of} {sel.st} counties</div>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            <button type="button" onClick={() => onScout(`${sel.n} County, ${sel.st}`)} style={btnStyle(CC.phosphor, true)}>Deep scout ↗ live web recon</button>
+            {sel.st === "FL"
+              ? <button type="button" onClick={() => scanHotspot(sel)} style={btnStyle(CC.cyan, false)}>⌖ Scan land sales here</button>
+              : <div style={{ ...mono, fontSize: 9.5, color: CC.stakeDim, textAlign: "center", border: `1px dashed ${CC.edge}`, borderRadius: 4, padding: "7px 10px" }}>SALES SCAN + LOT LINES: FL ONLY (NEXT: {sel.st})</div>}
+            <button type="button" onClick={() => onCreateBox(sel.n, sel.st)} style={btnStyle(CC.amber, false)}>+ Start a buy box</button>
+          </div>
+        </div>
+      )}
+
+      {/* legend */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "9px 14px", borderTop: `1px solid ${CC.edge}`, alignItems: "center" }}>
+        <span style={{ ...mono, fontSize: 9.5, color: CC.stakeDim, letterSpacing: ".1em" }}>HEAT:</span>
+        {RADAR_TIERS.map(([lab, col]) => (
+          <span key={lab} style={{ ...mono, display: "flex", alignItems: "center", gap: 5, fontSize: 9.5, color: CC.stakeDim }}>
+            <span style={{ width: 8, height: 8, borderRadius: 99, background: col }} />{lab}
+          </span>
+        ))}
+        <span style={{ ...mono, fontSize: 9.5, color: CC.stakeDim, marginLeft: "auto" }}>US Census permits '24 · '25 · '26 YTD (May), FL·TX·NC·TN — lots, owners &amp; sales: FL cadastral, live</span>
+      </div>
     </div>
   );
 }
