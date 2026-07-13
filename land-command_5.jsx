@@ -2535,6 +2535,63 @@ function CallScriptsTab({ settings }) {
    TAB — MARKET SCOUT (AI growth-signal analyzer)
    Calls Claude with live web search from inside the app.
    ============================================================ */
+/* ============================================================
+   CLAUDE API ACCESS
+   Inside the native NearbiJSX app, fetches to api.anthropic.com
+   are proxied with auth injected — no headers needed. On the web
+   (GitHub Pages / localhost) the user supplies their own API key,
+   stored only in this browser's saved data, and we call the API
+   directly with the documented browser-access header.
+   ============================================================ */
+const AI_MODEL = "claude-opus-4-8";
+const getAiKey = (data) => (((data || {}).settings) || {}).aiKey || "";
+
+async function askClaude(prompt, aiKey) {
+  const headers = { "Content-Type": "application/json" };
+  if (aiKey) {
+    headers["x-api-key"] = aiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    headers["anthropic-dangerous-direct-browser-access"] = "true";
+  }
+  let resJson;
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: AI_MODEL,
+        max_tokens: 8000,
+        thinking: { type: "adaptive" },
+        messages: [{ role: "user", content: prompt }],
+        tools: [{ type: "web_search_20260209", name: "web_search" }],
+      }),
+    });
+    resJson = await response.json();
+  } catch (_) {
+    // In a browser with no key, the request dies on CORS before any response
+    const err = new Error(aiKey
+      ? "Couldn't reach the Claude API — check your connection and try again."
+      : "You're on the web version — add your Claude API key below to unlock live AI research.");
+    err.needsKey = !aiKey;
+    throw err;
+  }
+  if (resJson && (resJson.type === "error" || resJson.error)) {
+    const msg = (resJson.error && resJson.error.message) || "API returned an error.";
+    if (/api.?key|authentication|credit|billing/i.test(msg)) {
+      const err = new Error(aiKey ? `Your API key was rejected (${msg}) — check it below.` : "Add your Claude API key below to unlock live AI research.");
+      err.needsKey = true;
+      throw err;
+    }
+    throw new Error(msg);
+  }
+  if (resJson && resJson.stop_reason === "refusal") throw new Error("The model declined this request — try rephrasing the market name.");
+  const fullText = (resJson.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n");
+  if (!fullText.trim()) throw new Error("No response text returned — try again in a moment.");
+  const match = fullText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("Analysis came back unstructured — try again.");
+  return JSON.parse(match[0].replace(/```json|```/g, "").trim());
+}
+
 const SCOUT_SIGNALS = ["Retail Expansion", "Population Growth", "Builder Demand", "Infrastructure Signals", "Land Availability", "Motivated Seller Pool"];
 
 function MarketScoutTab({ onCreateBox, data, update }) {
@@ -2543,7 +2600,25 @@ function MarketScoutTab({ onCreateBox, data, update }) {
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
   const [lotFind, setLotFind] = useState(null); // {q, seq} → RadarMap flies to the lot + owner card
+  const [needKey, setNeedKey] = useState(false);  // web version needs the user's Claude API key
+  const [keyOpen, setKeyOpen] = useState(false);  // manual toggle for the key panel
+  const [keyDraft, setKeyDraft] = useState("");
   const scoutHistory = (data && data.scout) ? data.scout : {};
+  const hasKey = !!getAiKey(data);
+
+  const saveKey = () => {
+    const k = keyDraft.trim();
+    if (!k || !update) return;
+    update({ ...data, settings: { ...(data.settings || {}), aiKey: k } });
+    setKeyDraft(""); setNeedKey(false); setKeyOpen(false); setError("");
+    if (loc.trim() && !looksLikeLotQuery(loc)) runScout(loc, k); // retry with the fresh key
+  };
+  const clearKey = () => {
+    if (!update) return;
+    const s = { ...(data.settings || {}) };
+    delete s.aiKey;
+    update({ ...data, settings: s });
+  };
 
   const findLot = (target) => {
     const q = String(target != null ? target : loc).trim();
@@ -2561,41 +2636,24 @@ function MarketScoutTab({ onCreateBox, data, update }) {
     return C.faint;
   };
 
-  const runScout = async (target) => {
+  const runScout = async (target, keyOverride) => {
     const market = (target || loc).trim();
     if (!market || loading) return;
     setLoc(market); setLoading(true); setError(""); setReport(null);
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: `You are a real estate market intelligence analyst for a land wholesaler who sells vacant lots to home builders. Use web search to analyze "${market}" as a builder market. Look for: retail precursor chains (Starbucks, Chick-fil-A, Dollar General, AutoZone, hospitals) arriving ahead of homes; population growth; builder/permit activity; infrastructure projects; remaining raw land; and motivated seller potential (longtime owners, farmers, heirs).
+      const prompt = `You are a real estate market intelligence analyst for a land wholesaler who sells vacant lots to home builders. Use web search to analyze "${market}" as a builder market. Look for: retail precursor chains (Starbucks, Chick-fil-A, Dollar General, AutoZone, hospitals) arriving ahead of homes; population growth; builder/permit activity; infrastructure projects; remaining raw land; and motivated seller potential (longtime owners, farmers, heirs).
 
 Respond with ONLY a JSON object — no markdown fences, no preamble, no text after. Exact schema:
-{"market":"${market}","lat":decimal latitude,"lng":decimal longitude,"score":0-100,"verdict":"ON FIRE"|"HEATING UP"|"WATCH LIST"|"TOO EARLY"|"COLD","summary":"2 sentences on the market","signals":[{"name":"Retail Expansion","score":0-100,"insight":"1 sentence"},{"name":"Population Growth","score":0-100,"insight":"1 sentence"},{"name":"Builder Demand","score":0-100,"insight":"1 sentence"},{"name":"Infrastructure Signals","score":0-100,"insight":"1 sentence"},{"name":"Land Availability","score":0-100,"insight":"1 sentence"},{"name":"Motivated Seller Pool","score":0-100,"insight":"1 sentence"}],"retail":["brands recently arrived or announced"],"actions":["4-5 specific next steps for this wholesaler"],"similar":["3 similar markets to scout"],"risks":"1 sentence on the main risk"}`,
-          }],
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-        }),
-      });
-      const resJson = await response.json();
-      if (resJson && resJson.type === "error") throw new Error(resJson.error?.message || "API returned an error.");
-      if (resJson && resJson.error) throw new Error(resJson.error.message || "API error.");
-      const fullText = (resJson.content || []).map(b => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n");
-      if (!fullText.trim()) throw new Error("No response text returned — try again in a moment.");
-      const match = fullText.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("Analysis came back unstructured — hit Scout again.");
-      const parsed = JSON.parse(match[0].replace(/```json|```/g, "").trim());
+{"market":"${market}","lat":decimal latitude,"lng":decimal longitude,"score":0-100,"verdict":"ON FIRE"|"HEATING UP"|"WATCH LIST"|"TOO EARLY"|"COLD","summary":"2 sentences on the market","signals":[{"name":"Retail Expansion","score":0-100,"insight":"1 sentence"},{"name":"Population Growth","score":0-100,"insight":"1 sentence"},{"name":"Builder Demand","score":0-100,"insight":"1 sentence"},{"name":"Infrastructure Signals","score":0-100,"insight":"1 sentence"},{"name":"Land Availability","score":0-100,"insight":"1 sentence"},{"name":"Motivated Seller Pool","score":0-100,"insight":"1 sentence"}],"retail":["brands recently arrived or announced"],"actions":["4-5 specific next steps for this wholesaler"],"similar":["3 similar markets to scout"],"risks":"1 sentence on the main risk"}`;
+      const parsed = await askClaude(prompt, keyOverride !== undefined ? keyOverride : getAiKey(data));
       setReport(parsed);
-      // persist so the recon map remembers every scouted market
+      setNeedKey(false);
+      // persist so the radar map remembers every scouted market
       const key = market.trim().toLowerCase();
       if (update && data) update({ ...data, scout: { ...(data.scout || {}), [key]: { ...parsed, market, scoutedAt: new Date().toISOString().slice(0,10) } } });
     } catch (e) {
       setError(`Scout failed: ${e.message || e}`);
+      if (e.needsKey) setNeedKey(true);
     } finally {
       setLoading(false);
     }
@@ -2623,14 +2681,34 @@ Respond with ONLY a JSON object — no markdown fences, no preamble, no text aft
             <button key={m} type="button" onClick={() => runScout(m)}
               style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, border: `1px solid ${C.line}`, background: "#fff", color: C.ink, cursor: "pointer", fontWeight: 600 }}>{m}</button>
           ))}
+          <button type="button" onClick={() => setKeyOpen(!keyOpen)}
+            style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px", borderRadius: 99, border: `1px solid ${hasKey ? C.green : C.line}`, background: "#fff", color: hasKey ? C.green : C.faint, cursor: "pointer", fontWeight: 600 }}>
+            {hasKey ? "⚙ AI key ✓" : "⚙ AI key"}
+          </button>
         </div>
+
+        {(needKey || keyOpen) && (
+          <div style={{ marginTop: 12, padding: 14, border: `2px dashed ${needKey ? C.orange : C.line}`, borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>Claude API key — powers Deep Scout &amp; Delinquency research on the web</div>
+            <div style={{ fontSize: 12, color: C.faint, marginTop: 4, lineHeight: 1.5 }}>
+              The web version calls the AI with your own key. Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: C.orangeDark, fontWeight: 700 }}>console.anthropic.com → API keys</a> (a few dollars covers many scouts).
+              It's saved only in this browser — never in the app's code or on any server of ours. The mobile/desktop app doesn't need one.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+              <input className="lc-input" type="password" style={{ flex: 1, minWidth: 220 }} value={keyDraft} onChange={e => setKeyDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") saveKey(); }} placeholder={hasKey ? "Key saved ✓ — paste a new one to replace it" : "sk-ant-…"} />
+              <Btn onClick={saveKey}>{loc.trim() && !looksLikeLotQuery(loc) ? "Save & scout" : "Save key"}</Btn>
+              {hasKey && <Btn kind="ghost" onClick={clearKey}>Remove key</Btn>}
+            </div>
+          </div>
+        )}
       </div>
 
       <RadarMap history={scoutHistory} activeMarket={report ? (report.market || loc) : loc} onSelect={(rep) => { setReport(rep); setLoc(rep.market); setError(""); }} onScout={(m) => runScout(m)} onCreateBox={onCreateBox} data={data} update={update} lotFind={lotFind} />
 
       {loading && (
         <div style={{ marginTop: 14, padding: 24, textAlign: "center", color: C.faint, fontSize: 13.5, border: `2px dashed ${C.line}`, borderRadius: 8 }}>
-          Running live web research on {loc} — retail precursors, permits, population, land supply… (15–30 seconds)
+          Running live web research on {loc} — retail precursors, permits, population, land supply… (20–60 seconds)
         </div>
       )}
       {error && (
@@ -2712,29 +2790,13 @@ Respond with ONLY a JSON object — no markdown fences, no preamble, no text aft
    ============================================================ */
 function delinqKey(county, state) { return `${county.trim().toLowerCase()}|${state.trim().toLowerCase()}`; }
 
-async function researchCounty(county, state) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{
-        role: "user",
-        content: `You are a research assistant for a vacant-land investor. Use web search to find how to obtain the CURRENT delinquent property tax list for ${county} County, ${state}, and details on their tax sales. Find: the official tax collector / treasurer page for delinquent taxes, whether the delinquent list is downloadable (PDF/Excel/web portal) or requires a public records request, any cost, the next tax deed or tax lien sale date if announced, and where sales are held (e.g. RealAuction, Bid4Assets, GovEase, in-person).
+async function researchCounty(county, state, aiKey) {
+  const prompt = `You are a research assistant for a vacant-land investor. Use web search to find how to obtain the CURRENT delinquent property tax list for ${county} County, ${state}, and details on their tax sales. Find: the official tax collector / treasurer page for delinquent taxes, whether the delinquent list is downloadable (PDF/Excel/web portal) or requires a public records request, any cost, the next tax deed or tax lien sale date if announced, and where sales are held (e.g. RealAuction, Bid4Assets, GovEase, in-person).
 
 Respond with ONLY a JSON object — no markdown fences, no preamble, no trailing text. Exact schema:
 {"county":"${county}","state":"${state}","listFormat":"PDF"|"Excel"|"Web portal"|"Records request"|"Unknown","howToGet":"2-3 sentences with exact steps","cost":"free or fee details","requestRequired":true|false,"nextSaleDate":"date or 'not announced'","saleType":"tax deed"|"tax lien"|"both"|"unknown","salePlatform":"platform or location","links":[{"name":"short label","url":"https://..."}],"tip":"1 sentence insider tip for working this county's list"}
-Include up to 4 links: the delinquent list page, the tax collector page, the sale/auction page, and the records request page if applicable. Only include URLs you actually found.`,
-      }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-    }),
-  });
-  const data = await response.json();
-  const fullText = (data.content || []).map(b => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n");
-  const match = fullText.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("no result");
-  return JSON.parse(match[0].replace(/```json|```/g, "").trim());
+Include up to 4 links: the delinquent list page, the tax collector page, the sale/auction page, and the records request page if applicable. Only include URLs you actually found.`;
+  return askClaude(prompt, aiKey);
 }
 
 function DelinquencyHubTab({ data, update, onGoImport }) {
@@ -2758,11 +2820,13 @@ function DelinquencyHubTab({ data, update, onGoImport }) {
     setBusy(p => ({ ...p, [key]: true }));
     setErrors(p => ({ ...p, [key]: "" }));
     try {
-      const result = await researchCounty(c.county, c.state);
+      const result = await researchCounty(c.county, c.state, getAiKey(data));
       result.researchedAt = new Date().toISOString().slice(0, 10);
       update({ ...data, delinq: { ...(data.delinq || {}), [key]: result } });
     } catch (e) {
-      setErrors(p => ({ ...p, [key]: "Research failed — hit Research again in a few seconds." }));
+      setErrors(p => ({ ...p, [key]: e && e.needsKey
+        ? "Web version needs your Claude API key — add it in Market Scout (⚙ AI key button), then research again."
+        : "Research failed — hit Research again in a few seconds." }));
     } finally {
       setBusy(p => ({ ...p, [key]: false }));
     }
