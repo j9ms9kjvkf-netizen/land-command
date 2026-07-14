@@ -3439,6 +3439,85 @@ async function scanLandSales(lat, lng) {
   return { sales, vacCount: vac.length, impCount: sales.length - vac.length, medPpa, parcels: feats.length };
 }
 
+/* ============================================================
+   COMPING ENGINE — subject lot vs recent nearby vacant-land
+   sales from the FL cadastral. One bbox query (no server-side
+   WHERE), then a strict match ladder relaxed only until at
+   least 3 comps qualify:
+     T1: ≤1.0 mi · sold ≤24 mo · size within ±25%
+     T2: ≤1.0 mi · ≤36 mo · ±50%
+     T3: ≤1.0 mi · ≤60 mo · 0.5–2×
+     T4: ≤1.4 mi · ≤60 mo · 0.5–2×   (last resort)
+   ============================================================ */
+const COMP_TIERS = [
+  { mi: 1.0, mo: 24, lo: 0.75, hi: 1.33, label: "≤1 mi · 24 mo · size ±25%" },
+  { mi: 1.0, mo: 36, lo: 0.6,  hi: 1.67, label: "≤1 mi · 36 mo · size ±50%" },
+  { mi: 1.0, mo: 60, lo: 0.5,  hi: 2.0,  label: "≤1 mi · 60 mo · size 0.5–2×" },
+  { mi: 1.4, mo: 60, lo: 0.5,  hi: 2.0,  label: "≤1.4 mi · 60 mo · size 0.5–2×" },
+];
+
+async function fetchLotComps(subject, wide) {
+  const now = new Date(), yr = now.getFullYear();
+  // Dense areas resolve within 1.05 mi; the 1.45 mi pass (tier 4) only runs when
+  // the tight pass finds <3 comps — big boxes over dense suburbs time this server out.
+  const mi = wide ? 1.45 : 1.05, dlat = mi / 69, dlng = mi / (69 * Math.cos((subject.lat * Math.PI) / 180));
+  const params = new URLSearchParams({
+    geometry: `${subject.lng - dlng},${subject.lat - dlat},${subject.lng + dlng},${subject.lat + dlat}`,
+    geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
+    outFields: "PARCEL_ID,SALE_PRC1,SALE_YR1,SALE_MO1,LND_SQFOOT,DOR_UC,PHY_ADDR1,PHY_CITY",
+    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "2000", f: "json",
+  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 40000);
+  let feats;
+  try {
+    const r = await fetch(`${FL_CADASTRAL}/query?${params}`, { signal: ctrl.signal });
+    const j = await r.json();
+    feats = j.features || [];
+  } finally { clearTimeout(timer); }
+
+  const seen = {};
+  const pool = feats.map((ft) => {
+    const c = ft.centroid, p = ft.attributes || {};
+    if (!c) return null;
+    const apn = String(p.PARCEL_ID || "").trim();
+    const price = parseFloat(p.SALE_PRC1) || 0, y = parseFloat(p.SALE_YR1) || 0;
+    const acres = (parseFloat(p.LND_SQFOOT) || 0) / 43560;
+    const vacant = FL_VACANT_UC.includes(String(p.DOR_UC || "").trim());
+    if (!vacant || !(price > 2000 && acres > 0 && y >= yr - 5)) return null;
+    if (apn && apn === subject.apn) return null;               // never comp against itself
+    if (apn) { if (seen[apn]) return null; seen[apn] = 1; }
+    const mo = parseInt(p.SALE_MO1) || 6;
+    const ageMo = (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - mo);
+    const dist = Math.hypot((c.y - subject.lat) * 69, (c.x - subject.lng) * 69 * Math.cos((subject.lat * Math.PI) / 180));
+    return { lat: c.y, lng: c.x, apn, price, y, m: mo, ageMo, acres, ppa: Math.round(price / acres), dist,
+      addr: [String(p.PHY_ADDR1 || "").trim(), String(p.PHY_CITY || "").trim()].filter(Boolean).join(", ") };
+  }).filter(Boolean);
+
+  const A = subject.acres > 0 ? subject.acres : 0;
+  // similarity: identical size > close > recent
+  const simScore = (x) => {
+    const sizeSim = A > 0 ? Math.min(x.acres / A, A / x.acres) : 0.8; // 1 = identical size
+    return sizeSim * 100 - x.dist * 22 - Math.max(0, x.ageMo) * 0.9;
+  };
+  let chosen = [], tierIdx = -1;
+  for (let i = 0; i < COMP_TIERS.length; i++) {
+    const t = COMP_TIERS[i];
+    const band = pool.filter((x) => x.dist <= t.mi && x.ageMo <= t.mo &&
+      (A <= 0 || (x.acres >= A * t.lo && x.acres <= A * t.hi)));
+    if (band.length >= 3 || i === COMP_TIERS.length - 1) {
+      chosen = band.sort((a, b) => simScore(b) - simScore(a)).slice(0, 5);
+      tierIdx = i;
+      break;
+    }
+  }
+  const ppas = chosen.map((x) => x.ppa).sort((a, b) => a - b);
+  const medPpa = ppas.length ? ppas[Math.floor(ppas.length / 2)] : 0;
+  return { comps: chosen, medPpa, est: A > 0 && medPpa ? Math.round(medPpa * A) : 0,
+    tier: tierIdx, tierLabel: tierIdx >= 0 ? COMP_TIERS[tierIdx].label : "", poolCount: pool.length,
+    sizeUnknown: A <= 0 };
+}
+
 const RADAR_CSS = `
 .ms-map.leaflet-container { background: ${CC.abyss}; font-family: 'JetBrains Mono', monospace; }
 .ms-nogrid.leaflet-container { background-image:
@@ -3457,6 +3536,12 @@ const RADAR_CSS = `
   font-family: 'JetBrains Mono', monospace !important; font-size: 11px !important; border-radius: 4px !important;
   box-shadow: 0 4px 14px rgba(0,0,0,.5) !important; }
 .ms-tip::before { display: none !important; }
+.ms-compnum { width: 20px; height: 20px; border-radius: 50%; background: ${CC.cyan}; color: ${CC.abyss};
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 800; display: flex; align-items: center;
+  justify-content: center; border: 2px solid ${CC.abyss}; box-shadow: 0 0 8px ${CC.cyan}; }
+.ms-comptable { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: nowrap; }
+.ms-comptable th { text-align: left; padding: 6px 10px; color: ${CC.stakeDim}; font-size: 9.5px; letter-spacing: .12em; border-bottom: 1px solid ${CC.edge}; }
+.ms-comptable td { padding: 7px 10px; color: ${CC.stake}; border-bottom: 1px solid ${CC.edge}; }
 .ms-chip { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; cursor: pointer; padding: 5px 11px;
   border-radius: 4px; border: 1px solid ${CC.edge}; background: ${CC.moss}; color: ${CC.stake};
   font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .04em; transition: border-color .12s; }
@@ -3479,6 +3564,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const [scan, setScan] = useState(null);
   const [lots, setLots] = useState(null);   // lot-lines fetch status
   const [card, setCard] = useState(null);   // selected parcel ownership card
+  const [comps, setComps] = useState(null); // comp chart for the selected lot
   const [finder, setFinder] = useState(null); // APN/address lot search status
   const [dossOpen, setDossOpen] = useState(true); // county dossier expanded?
   const markets = Object.values(history || {}).filter((r) => r && typeof r.lat === "number" && typeof r.lng === "number");
@@ -3498,7 +3584,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       mapRef.current = { L, map, tiles: null, labels: null, canvas: L.canvas({ padding: 0.3 }),
         lotLayer: L.layerGroup().addTo(map), scanLayer: L.layerGroup().addTo(map),
         hotLayer: L.layerGroup().addTo(map), histLayer: L.layerGroup().addTo(map),
-        findLayer: L.layerGroup().addTo(map),
+        findLayer: L.layerGroup().addTo(map), compLayer: L.layerGroup().addTo(map),
         lotCtrl: null, lotTimer: null, selLot: null };
       map.on("zoomend", () => setZoom(map.getZoom()));
       map.on("moveend", () => { setZoom(map.getZoom()); refreshLotsRef.current(); });
@@ -3598,13 +3684,15 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const closeCard = () => {
     const m = mapRef.current;
     if (m && m.selLot) { try { m.selLot.setStyle(LOT_STYLE); } catch (_) {} m.selLot = null; }
-    if (m) m.findLayer.clearLayers();
-    setCard(null);
+    if (m) { m.findLayer.clearLayers(); m.compLayer.clearLayers(); }
+    setCard(null); setComps(null);
   };
 
   const openLotCard = (ft, latlng, lyr) => {
     const m = mapRef.current; if (!m) return;
     m.findLayer.clearLayers();
+    m.compLayer.clearLayers();
+    setComps(null); // new subject → old comp chart no longer applies
     if (m.selLot) { try { m.selLot.setStyle(LOT_STYLE); } catch (_) {} }
     m.selLot = lyr; try { lyr.setStyle(LOT_STYLE_SEL); } catch (_) {}
     const p = ft.properties || {};
@@ -3760,6 +3848,39 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     if (ready && lotFind && lotFind.seq && lotFind.q) findLot(lotFind.q);
   }, [ready, lotFind ? lotFind.seq : 0]);
 
+  /* ---- comps: subject lot vs recent same-size vacant sales nearby ---- */
+  const runComps = async (subj) => {
+    const m = mapRef.current;
+    const s = subj || card;
+    if (!s) return;
+    setComps({ status: "loading" });
+    if (m) m.compLayer.clearLayers();
+    try {
+      const subj = { lat: s.lat, lng: s.lng, acres: s.acres, apn: s.apn };
+      let res = await fetchLotComps(subj);
+      if (res.comps.length < 3) {
+        // thin inside 1 mile — widen the net once (rural areas: few parcels, fast query)
+        try { const wideRes = await fetchLotComps(subj, true); if (wideRes.comps.length > res.comps.length) res = wideRes; } catch (_) { /* keep tight result */ }
+      }
+      if (m) {
+        res.comps.forEach((x, i) => {
+          const mk = m.L.marker([x.lat, x.lng], {
+            icon: m.L.divIcon({ html: `<div class="ms-compnum">${i + 1}</div>`, className: "ms-wrap", iconSize: [20, 20] }),
+            zIndexOffset: 2000,
+          });
+          mk.bindTooltip(`COMP ${i + 1} · $${x.price.toLocaleString()} · ${x.acres.toFixed(2)} ac · $${x.ppa.toLocaleString()}/ac · ${x.m}/${x.y} · ${x.dist.toFixed(2)} mi`, { className: "ms-tip" });
+          m.compLayer.addLayer(mk);
+        });
+      }
+      setComps({ status: res.comps.length ? "done" : "empty",
+        subject: { apn: s.apn, addr: s.site, acres: s.acres, salePrice: s.salePrice, saleYr: s.saleYr, saleMo: s.saleMo, jv: s.jv },
+        ...res });
+    } catch (_) {
+      setComps({ status: "error" });
+    }
+  };
+  const clearComps = () => { const m = mapRef.current; if (m) m.compLayer.clearLayers(); setComps(null); };
+
   const cardLeadId = (c) => "gis_" + (c.apn ? c.apn.replace(/\s+/g, "") : `${c.lat.toFixed(6)}_${c.lng.toFixed(6)}`);
   const cardInPipeline = card && data && (data.leads || []).some((l) => l.id === cardLeadId(card));
   const sendToPipeline = () => {
@@ -3889,6 +4010,9 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
               {card.jv > 0 && <div style={{ fontSize: 12, color: CC.stakeDim }}>County just value ${Math.round(card.jv).toLocaleString()}{card.lndVal > 0 && card.lndVal !== card.jv ? ` · land $${Math.round(card.lndVal).toLocaleString()}` : ""}</div>}
             </div>
             <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
+              <button type="button" onClick={() => runComps()} style={btnStyle(CC.cyan, true)} disabled={comps && comps.status === "loading"}>
+                {comps && comps.status === "loading" ? "⚖ Pulling comps…" : "⚖ Comp this lot"}
+              </button>
               {card.sent === "ok" || cardInPipeline
                 ? <div style={{ ...mono, fontSize: 10.5, color: CC.phosphor, textAlign: "center", border: `1px dashed ${CC.phosphorDim}`, borderRadius: 4, padding: "7px 10px" }}>✓ IN PIPELINE — skip trace &amp; call</div>
                 : <button type="button" onClick={sendToPipeline} style={btnStyle(CC.phosphor, true)}>→ Send owner to pipeline</button>}
@@ -3916,6 +4040,77 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
             </>
           )}
           <button type="button" onClick={clearScan} style={{ ...btnStyle(CC.stakeDim, false), marginLeft: "auto" }}>Clear</button>
+        </div>
+      )}
+
+      {/* comp chart — subject lot vs matched recent sales */}
+      {comps && comps.status !== "loading" && (
+        <div style={{ borderTop: `1px solid ${CC.edge}`, background: CC.abyss }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", flexWrap: "wrap" }}>
+            <span style={{ ...mono, fontSize: 10, fontWeight: 700, letterSpacing: ".2em", textTransform: "uppercase", color: CC.cyan }}>⚖ Comp chart</span>
+            {comps.subject && <span style={{ ...mono, fontSize: 10.5, color: CC.stakeDim }}>{comps.subject.addr || `APN ${comps.subject.apn}`}</span>}
+            {comps.status === "done" && <span style={{ ...mono, fontSize: 10, color: CC.stakeDim }}>match: {comps.tierLabel} · {comps.poolCount} vacant sales screened</span>}
+            <button type="button" onClick={clearComps} style={{ ...btnStyle(CC.stakeDim, false), marginLeft: "auto", padding: "4px 10px" }}>✕ Clear</button>
+          </div>
+
+          {comps.status === "error" && (
+            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>Comp pull failed — the state parcel server hiccuped. Hit “⚖ Comp this lot” again.</div>
+          )}
+          {comps.status === "empty" && (
+            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>No qualifying vacant-land sales within 1.4 mi / 5 yrs — thin market. Try the ⌖ sales scan for a wider read.</div>
+          )}
+
+          {comps.status === "done" && (
+            <>
+              {/* verdict strip */}
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline", padding: "0 14px 10px" }}>
+                <span style={{ ...mono, fontSize: 11, color: CC.stakeDim }}>MEDIAN <b style={{ fontSize: 16, color: CC.cyan }}>${comps.medPpa.toLocaleString()}</b>/AC</span>
+                {comps.est > 0 && <span style={{ ...mono, fontSize: 11, color: CC.stakeDim }}>EST. MARKET VALUE <b style={{ fontSize: 16, color: CC.phosphor }}>${comps.est.toLocaleString()}</b></span>}
+                {comps.est > 0 && <span style={{ ...mono, fontSize: 10.5, color: CC.amber }}>wholesale offer zone (50–70%): ${Math.round(comps.est * 0.5).toLocaleString()} – ${Math.round(comps.est * 0.7).toLocaleString()}</span>}
+              </div>
+              {(comps.tier > 0 || comps.sizeUnknown || comps.comps.length < 3) && (
+                <div style={{ ...mono, fontSize: 10, color: CC.amber, padding: "0 14px 8px" }}>
+                  {comps.comps.length < 3 ? `⚠ Only ${comps.comps.length} qualifying sale${comps.comps.length === 1 ? "" : "s"} found — treat the number as a rough read. ` : ""}
+                  {comps.tier > 0 ? "⚠ Not enough near-identical sales — criteria widened to find matches. " : ""}
+                  {comps.sizeUnknown ? "⚠ Subject lot size missing on the roll — matched on distance + recency only." : ""}
+                </div>
+              )}
+              <div className="ms-scroll" style={{ overflowX: "auto", padding: "0 14px 14px" }}>
+                <table className="ms-comptable">
+                  <thead><tr>
+                    <th>#</th><th>LOT</th><th>SOLD</th><th>PRICE</th><th>ACRES</th><th>$/AC</th><th>DIST</th><th>VS SUBJ</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr style={{ background: CC.mossLit }}>
+                      <td style={{ color: "#FFE14D", fontWeight: 800 }}>SUBJ</td>
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{comps.subject.addr || `APN ${comps.subject.apn}`}</td>
+                      <td style={{ color: CC.stakeDim }}>{comps.subject.salePrice > 2000 && comps.subject.saleYr ? `${comps.subject.saleMo ? comps.subject.saleMo + "/" : ""}${comps.subject.saleYr}` : "—"}</td>
+                      <td style={{ color: CC.stakeDim }}>{comps.subject.salePrice > 2000 ? `$${Math.round(comps.subject.salePrice).toLocaleString()}` : (comps.subject.jv > 0 ? `JV $${Math.round(comps.subject.jv).toLocaleString()}` : "—")}</td>
+                      <td style={{ fontWeight: 800 }}>{comps.subject.acres > 0 ? comps.subject.acres.toFixed(2) : "?"}</td>
+                      <td style={{ color: CC.phosphor, fontWeight: 800 }}>{comps.est > 0 ? `→ $${comps.medPpa.toLocaleString()}` : "—"}</td>
+                      <td>0.00</td>
+                      <td style={{ color: "#FFE14D" }}>SUBJECT</td>
+                    </tr>
+                    {comps.comps.map((x, i) => {
+                      const sizePct = comps.subject.acres > 0 ? Math.round((x.acres / comps.subject.acres) * 100) : null;
+                      return (
+                        <tr key={i}>
+                          <td><span className="ms-compnum" style={{ width: 17, height: 17, fontSize: 10 }}>{i + 1}</span></td>
+                          <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{x.addr || `APN ${x.apn}`}</td>
+                          <td>{x.m}/{x.y}</td>
+                          <td>${x.price.toLocaleString()}</td>
+                          <td>{x.acres.toFixed(2)}</td>
+                          <td style={{ color: CC.cyan, fontWeight: 700 }}>${x.ppa.toLocaleString()}</td>
+                          <td>{x.dist.toFixed(2)} mi</td>
+                          <td style={{ color: sizePct != null && sizePct >= 80 && sizePct <= 125 ? CC.phosphor : CC.amber }}>{sizePct != null ? `${sizePct}% size` : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       )}
 
