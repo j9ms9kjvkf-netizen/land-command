@@ -3456,46 +3456,26 @@ const COMP_TIERS = [
   { mi: 1.4, mo: 60, lo: 0.5,  hi: 2.0,  label: "≤1.4 mi · 60 mo · size 0.5–2×" },
 ];
 
-async function fetchLotComps(subject, wide) {
-  const now = new Date(), yr = now.getFullYear();
-  // Dense areas resolve within 1.05 mi; the 1.45 mi pass (tier 4) only runs when
-  // the tight pass finds <3 comps — big boxes over dense suburbs time this server out.
-  const mi = wide ? 1.45 : 1.05, dlat = mi / 69, dlng = mi / (69 * Math.cos((subject.lat * Math.PI) / 180));
-  const params = new URLSearchParams({
-    geometry: `${subject.lng - dlng},${subject.lat - dlat},${subject.lng + dlng},${subject.lat + dlat}`,
-    geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
-    outFields: "PARCEL_ID,SALE_PRC1,SALE_YR1,SALE_MO1,LND_SQFOOT,DOR_UC,PHY_ADDR1,PHY_CITY",
-    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "2000", f: "json",
-  });
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 40000);
-  let feats;
-  try {
-    const r = await fetch(`${FL_CADASTRAL}/query?${params}`, { signal: ctrl.signal });
-    const j = await r.json();
-    feats = j.features || [];
-  } finally { clearTimeout(timer); }
+// Normalize one parcel record into a comp candidate (or null if it doesn't qualify)
+function compCandidate(lat, lng, p, subject, now, yr) {
+  const apn = String(p.PARCEL_ID || "").trim();
+  const price = parseFloat(p.SALE_PRC1) || 0, y = parseFloat(p.SALE_YR1) || 0;
+  const acres = (parseFloat(p.LND_SQFOOT) || 0) / 43560;
+  const vacant = FL_VACANT_UC.includes(String(p.DOR_UC || "").trim());
+  if (!vacant || !(price > 2000 && acres > 0 && y >= yr - 5)) return null;
+  if (apn && apn === subject.apn) return null;                 // never comp against itself
+  const mo = parseInt(p.SALE_MO1) || 6;
+  const ageMo = (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - mo);
+  const dist = Math.hypot((lat - subject.lat) * 69, (lng - subject.lng) * 69 * Math.cos((subject.lat * Math.PI) / 180));
+  return { lat, lng, apn, price, y, m: mo, ageMo, acres, ppa: Math.round(price / acres), dist,
+    addr: [String(p.PHY_ADDR1 || "").trim(), String(p.PHY_CITY || "").trim()].filter(Boolean).join(", ") };
+}
 
+// Tier ladder + similarity ranking over a candidate pool → chart data
+function pickComps(pool, subject) {
   const seen = {};
-  const pool = feats.map((ft) => {
-    const c = ft.centroid, p = ft.attributes || {};
-    if (!c) return null;
-    const apn = String(p.PARCEL_ID || "").trim();
-    const price = parseFloat(p.SALE_PRC1) || 0, y = parseFloat(p.SALE_YR1) || 0;
-    const acres = (parseFloat(p.LND_SQFOOT) || 0) / 43560;
-    const vacant = FL_VACANT_UC.includes(String(p.DOR_UC || "").trim());
-    if (!vacant || !(price > 2000 && acres > 0 && y >= yr - 5)) return null;
-    if (apn && apn === subject.apn) return null;               // never comp against itself
-    if (apn) { if (seen[apn]) return null; seen[apn] = 1; }
-    const mo = parseInt(p.SALE_MO1) || 6;
-    const ageMo = (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - mo);
-    const dist = Math.hypot((c.y - subject.lat) * 69, (c.x - subject.lng) * 69 * Math.cos((subject.lat * Math.PI) / 180));
-    return { lat: c.y, lng: c.x, apn, price, y, m: mo, ageMo, acres, ppa: Math.round(price / acres), dist,
-      addr: [String(p.PHY_ADDR1 || "").trim(), String(p.PHY_CITY || "").trim()].filter(Boolean).join(", ") };
-  }).filter(Boolean);
-
+  pool = pool.filter((x) => { if (!x.apn) return true; if (seen[x.apn]) return false; seen[x.apn] = 1; return true; });
   const A = subject.acres > 0 ? subject.acres : 0;
-  // similarity: identical size > close > recent
   const simScore = (x) => {
     const sizeSim = A > 0 ? Math.min(x.acres / A, A / x.acres) : 0.8; // 1 = identical size
     return sizeSim * 100 - x.dist * 22 - Math.max(0, x.ageMo) * 0.9;
@@ -3516,6 +3496,41 @@ async function fetchLotComps(subject, wide) {
   return { comps: chosen, medPpa, est: A > 0 && medPpa ? Math.round(medPpa * A) : 0,
     tier: tierIdx, tierLabel: tierIdx >= 0 ? COMP_TIERS[tierIdx].label : "", poolCount: pool.length,
     sizeUnknown: A <= 0 };
+}
+
+// INSTANT pass: comp against the parcels already downloaded for the lot-lines
+// layer — zero network, renders in milliseconds.
+function compsFromFeatures(feats, subject) {
+  const now = new Date(), yr = now.getFullYear();
+  const pool = (feats || []).map((f) => {
+    const c = featureRoughCenter(f);
+    return c ? compCandidate(c[1], c[0], f.properties || {}, subject, now, yr) : null;
+  }).filter(Boolean);
+  return pickComps(pool, subject);
+}
+
+// FULL pass: dedicated ≤1 mi sweep from the server (background refinement).
+async function fetchLotComps(subject, wide) {
+  const now = new Date(), yr = now.getFullYear();
+  // Dense areas resolve within 1.05 mi; the 1.45 mi pass (tier 4) only runs when
+  // the tight pass finds <3 comps — big boxes over dense suburbs time this server out.
+  const mi = wide ? 1.45 : 1.05, dlat = mi / 69, dlng = mi / (69 * Math.cos((subject.lat * Math.PI) / 180));
+  const params = new URLSearchParams({
+    geometry: `${subject.lng - dlng},${subject.lat - dlat},${subject.lng + dlng},${subject.lat + dlat}`,
+    geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
+    outFields: "PARCEL_ID,SALE_PRC1,SALE_YR1,SALE_MO1,LND_SQFOOT,DOR_UC,PHY_ADDR1,PHY_CITY",
+    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "2000", f: "json",
+  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 40000);
+  let feats;
+  try {
+    const r = await fetch(`${FL_CADASTRAL}/query?${params}`, { signal: ctrl.signal });
+    const j = await r.json();
+    feats = j.features || [];
+  } finally { clearTimeout(timer); }
+  const pool = feats.map((ft) => (ft.centroid ? compCandidate(ft.centroid.y, ft.centroid.x, ft.attributes || {}, subject, now, yr) : null)).filter(Boolean);
+  return pickComps(pool, subject);
 }
 
 const RADAR_CSS = `
@@ -3567,6 +3582,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const [comps, setComps] = useState(null); // comp chart for the selected lot
   const [finder, setFinder] = useState(null); // APN/address lot search status
   const [dossOpen, setDossOpen] = useState(true); // county dossier expanded?
+  const compSeqRef = React.useRef(0); // race guard — a later selection cancels a stale background sweep
   const markets = Object.values(history || {}).filter((r) => r && typeof r.lat === "number" && typeof r.lng === "number");
   const effBase = baseMode === "auto" ? (zoom >= SAT_ZOOM ? "sat" : "dark") : baseMode;
 
@@ -3585,7 +3601,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         lotLayer: L.layerGroup().addTo(map), scanLayer: L.layerGroup().addTo(map),
         hotLayer: L.layerGroup().addTo(map), histLayer: L.layerGroup().addTo(map),
         findLayer: L.layerGroup().addTo(map), compLayer: L.layerGroup().addTo(map),
-        lotCtrl: null, lotTimer: null, selLot: null };
+        lotCtrl: null, lotTimer: null, selLot: null, lotFeats: [] };
       map.on("zoomend", () => setZoom(map.getZoom()));
       map.on("moveend", () => { setZoom(map.getZoom()); refreshLotsRef.current(); });
       window.__msMap = map; // debug/test hook
@@ -3700,7 +3716,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     const acres = (parseFloat(p.LND_SQFOOT) || 0) / 43560;
     const price = parseFloat(p.SALE_PRC1) || 0;
     const jv = parseFloat(p.JV) || 0;
-    setCard({
+    const cardObj = {
       lat: latlng.lat, lng: latlng.lng,
       apn: s(p.PARCEL_ID), owner: s(p.OWN_NAME),
       mail1: s(p.OWN_ADDR1), mail2: [s(p.OWN_CITY), s(p.OWN_STATE), s(p.OWN_ZIPCD)].filter(Boolean).join(", "),
@@ -3713,7 +3729,9 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       salePrice: price, saleYr: parseFloat(p.SALE_YR1) || 0, saleMo: s(p.SALE_MO1),
       yrBuilt: parseFloat(p.ACT_YR_BLT) || 0,
       sent: "",
-    });
+    };
+    setCard(cardObj);
+    runComps(cardObj); // auto-comp the instant the parcel is selected — no button, no wait
   };
 
   const refreshLots = () => {
@@ -3749,6 +3767,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         const j = await r.json();
         if (ctrl.signal.aborted) return;
         const feats = j.features || [];
+        m.lotFeats = feats; // cached for instant comps — every parcel on screen with full sale data
         m.lotLayer.clearLayers(); m.selLot = null;
         m.lotLayer.addLayer(m.L.geoJSON({ type: "FeatureCollection", features: feats }, {
           renderer: m.canvas, style: LOT_STYLE,
@@ -3831,6 +3850,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
           });
         }
         if (!feat) throw new Error("No parcel under that address — try its APN instead.");
+        m.lotFeats = feats; // seed the instant-comp pool with this neighborhood's parcels
       }
       const gl = m.L.geoJSON(feat, { style: LOT_STYLE_SEL, interactive: false });
       const ctr = gl.getBounds().getCenter();
@@ -3848,35 +3868,65 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     if (ready && lotFind && lotFind.seq && lotFind.q) findLot(lotFind.q);
   }, [ready, lotFind ? lotFind.seq : 0]);
 
-  /* ---- comps: subject lot vs recent same-size vacant sales nearby ---- */
+  /* ---- comps: subject lot vs recent same-size vacant sales nearby ----
+     Two speeds, same result shape:
+       INSTANT — comp against parcels already sitting in the lot-lines cache
+       (zero network — renders the moment the parcel is clicked).
+       BACKGROUND — a dedicated ≤1 mi sweep centered exactly on the subject,
+       which quietly replaces the instant estimate once it lands (usually
+       1-3s; the state server occasionally runs slower).
+     compSeqRef guards against a stale background result landing after the
+     user has already clicked a different parcel. */
+  const drawCompMarkers = (m, res) => {
+    if (!m) return;
+    m.compLayer.clearLayers();
+    res.comps.forEach((x, i) => {
+      const mk = m.L.marker([x.lat, x.lng], {
+        icon: m.L.divIcon({ html: `<div class="ms-compnum">${i + 1}</div>`, className: "ms-wrap", iconSize: [20, 20] }),
+        zIndexOffset: 2000,
+      });
+      mk.bindTooltip(`COMP ${i + 1} · $${x.price.toLocaleString()} · ${x.acres.toFixed(2)} ac · $${x.ppa.toLocaleString()}/ac · ${x.m}/${x.y} · ${x.dist.toFixed(2)} mi`, { className: "ms-tip" });
+      m.compLayer.addLayer(mk);
+    });
+  };
+
   const runComps = async (subj) => {
     const m = mapRef.current;
     const s = subj || card;
     if (!s) return;
-    setComps({ status: "loading" });
-    if (m) m.compLayer.clearLayers();
+    const mySeq = ++compSeqRef.current;
+    const subject = { lat: s.lat, lng: s.lng, acres: s.acres, apn: s.apn };
+    const subjMeta = { apn: s.apn, addr: s.site, acres: s.acres, salePrice: s.salePrice, saleYr: s.saleYr, saleMo: s.saleMo, jv: s.jv };
+
+    // INSTANT — no network. Comps the parcels already on screen from the
+    // lot-lines layer. If the subject was just clicked off the map, this
+    // pool is centered right where the user is looking.
+    let hadInstant = false;
+    if (m && m.lotFeats && m.lotFeats.length) {
+      const instRes = compsFromFeatures(m.lotFeats, subject);
+      if (instRes.comps.length) {
+        hadInstant = true;
+        drawCompMarkers(m, instRes);
+        setComps({ status: "instant", subject: subjMeta, ...instRes });
+      }
+    }
+    if (!hadInstant) setComps({ status: "loading", subject: subjMeta });
+
+    // BACKGROUND — dedicated sweep, replaces the instant estimate when done.
     try {
-      const subj = { lat: s.lat, lng: s.lng, acres: s.acres, apn: s.apn };
-      let res = await fetchLotComps(subj);
+      let res = await fetchLotComps(subject);
       if (res.comps.length < 3) {
         // thin inside 1 mile — widen the net once (rural areas: few parcels, fast query)
-        try { const wideRes = await fetchLotComps(subj, true); if (wideRes.comps.length > res.comps.length) res = wideRes; } catch (_) { /* keep tight result */ }
+        try { const wideRes = await fetchLotComps(subject, true); if (wideRes.comps.length > res.comps.length) res = wideRes; } catch (_) { /* keep tight result */ }
       }
-      if (m) {
-        res.comps.forEach((x, i) => {
-          const mk = m.L.marker([x.lat, x.lng], {
-            icon: m.L.divIcon({ html: `<div class="ms-compnum">${i + 1}</div>`, className: "ms-wrap", iconSize: [20, 20] }),
-            zIndexOffset: 2000,
-          });
-          mk.bindTooltip(`COMP ${i + 1} · $${x.price.toLocaleString()} · ${x.acres.toFixed(2)} ac · $${x.ppa.toLocaleString()}/ac · ${x.m}/${x.y} · ${x.dist.toFixed(2)} mi`, { className: "ms-tip" });
-          m.compLayer.addLayer(mk);
-        });
-      }
-      setComps({ status: res.comps.length ? "done" : "empty",
-        subject: { apn: s.apn, addr: s.site, acres: s.acres, salePrice: s.salePrice, saleYr: s.saleYr, saleMo: s.saleMo, jv: s.jv },
-        ...res });
+      if (mySeq !== compSeqRef.current) return; // a newer selection superseded this
+      if (!res.comps.length && hadInstant) return; // background found nothing — keep the instant estimate rather than blank it
+      drawCompMarkers(mapRef.current, res);
+      setComps({ status: res.comps.length ? "done" : "empty", subject: subjMeta, ...res });
     } catch (_) {
-      setComps({ status: "error" });
+      if (mySeq !== compSeqRef.current) return;
+      if (!hadInstant) setComps({ status: "error", subject: subjMeta });
+      // else: keep showing the instant estimate — the background refine just failed to improve on it
     }
   };
   const clearComps = () => { const m = mapRef.current; if (m) m.compLayer.clearLayers(); setComps(null); };
@@ -4010,8 +4060,11 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
               {card.jv > 0 && <div style={{ fontSize: 12, color: CC.stakeDim }}>County just value ${Math.round(card.jv).toLocaleString()}{card.lndVal > 0 && card.lndVal !== card.jv ? ` · land $${Math.round(card.lndVal).toLocaleString()}` : ""}</div>}
             </div>
             <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
-              <button type="button" onClick={() => runComps()} style={btnStyle(CC.cyan, true)} disabled={comps && comps.status === "loading"}>
-                {comps && comps.status === "loading" ? "⚖ Pulling comps…" : "⚖ Comp this lot"}
+              <button type="button" onClick={() => runComps()} style={btnStyle(CC.cyan, false)}>
+                {!comps ? "⚖ Comp this lot"
+                  : comps.status === "loading" ? "⚖ Pulling comps…"
+                  : comps.status === "instant" ? "↻ Refining comps…"
+                  : "↻ Re-run comps"}
               </button>
               {card.sent === "ok" || cardInPipeline
                 ? <div style={{ ...mono, fontSize: 10.5, color: CC.phosphor, textAlign: "center", border: `1px dashed ${CC.phosphorDim}`, borderRadius: 4, padding: "7px 10px" }}>✓ IN PIPELINE — skip trace &amp; call</div>
@@ -4043,24 +4096,29 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         </div>
       )}
 
-      {/* comp chart — subject lot vs matched recent sales */}
-      {comps && comps.status !== "loading" && (
+      {/* comp chart — subject lot vs matched recent sales. Renders the instant
+         the parcel is selected (from cached parcels), no click required. */}
+      {comps && (
         <div style={{ borderTop: `1px solid ${CC.edge}`, background: CC.abyss }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", flexWrap: "wrap" }}>
             <span style={{ ...mono, fontSize: 10, fontWeight: 700, letterSpacing: ".2em", textTransform: "uppercase", color: CC.cyan }}>⚖ Comp chart</span>
             {comps.subject && <span style={{ ...mono, fontSize: 10.5, color: CC.stakeDim }}>{comps.subject.addr || `APN ${comps.subject.apn}`}</span>}
             {comps.status === "done" && <span style={{ ...mono, fontSize: 10, color: CC.stakeDim }}>match: {comps.tierLabel} · {comps.poolCount} vacant sales screened</span>}
+            {comps.status === "instant" && <span style={{ ...mono, fontSize: 10, color: CC.cyan, display: "flex", alignItems: "center", gap: 5 }}><span className="cc-dot" style={{ width: 6, height: 6 }} />instant estimate — refining…</span>}
             <button type="button" onClick={clearComps} style={{ ...btnStyle(CC.stakeDim, false), marginLeft: "auto", padding: "4px 10px" }}>✕ Clear</button>
           </div>
 
+          {comps.status === "loading" && (
+            <div style={{ ...mono, fontSize: 11.5, color: CC.stakeDim, padding: "0 14px 12px" }}>⌖ Pulling comps for this lot…</div>
+          )}
           {comps.status === "error" && (
-            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>Comp pull failed — the state parcel server hiccuped. Hit “⚖ Comp this lot” again.</div>
+            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>Comp pull failed — the state parcel server hiccuped. Hit “↻ Re-run comps” again.</div>
           )}
           {comps.status === "empty" && (
             <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>No qualifying vacant-land sales within 1.4 mi / 5 yrs — thin market. Try the ⌖ sales scan for a wider read.</div>
           )}
 
-          {comps.status === "done" && (
+          {(comps.status === "done" || comps.status === "instant") && (
             <>
               {/* verdict strip */}
               <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline", padding: "0 14px 10px" }}>
