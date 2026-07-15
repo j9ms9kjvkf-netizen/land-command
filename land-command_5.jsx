@@ -3271,6 +3271,7 @@ const FL_CADASTRAL = "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/
 const FL_VACANT_UC = ["000", "00", "010", "10", "040", "40", "070", "70", "099", "99"];
 const PARCEL_ZOOM = 15; // lot lines + owner cards at this zoom and deeper
 const SAT_ZOOM = 13;    // auto-switch to satellite at this zoom (ground-level recon)
+const DOSSIER_ZOOM = 9; // auto-follow the county dossier to wherever the map is zoomed once past this
 
 // FL DOR land-use codes (the ones a land wholesaler actually meets)
 const DOR_LABELS = {
@@ -3328,6 +3329,17 @@ function nearestFLCounty(lat, lng) {
     if (d < bd) { bd = d; best = c; }
   });
   return best ? best.n : "";
+}
+
+// Nearest scored hotspot (any of the 4 radar states) → drives the county
+// dossier so it follows the map instead of only reacting to a chip/blip click.
+function nearestHotspot(lat, lng) {
+  let best = null, bd = Infinity;
+  RADAR_HOTSPOTS.forEach((c) => {
+    const d = (c.lat - lat) * (c.lat - lat) + (c.lng - lng) * (c.lng - lng);
+    if (d < bd) { bd = d; best = c; }
+  });
+  return best;
 }
 
 // st = state · f = county FIPS suffix · u24/u25 = SF permits full year · u26 = Jan–May 2026 YTD
@@ -3586,6 +3598,16 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const markets = Object.values(history || {}).filter((r) => r && typeof r.lat === "number" && typeof r.lng === "number");
   const effBase = baseMode === "auto" ? (zoom >= SAT_ZOOM ? "sat" : "dark") : baseMode;
 
+  // County dossier follows the map — whatever's searched, zoomed into, or
+  // selected. Fires from: a parcel click/search (openLotCard) and, once
+  // zoomed past DOSSIER_ZOOM, every pan/zoom of the map itself.
+  const focusDossierOn = (lat, lng) => {
+    const nearest = nearestHotspot(lat, lng);
+    if (!nearest) return;
+    setSel(nearest);
+    setStFilter(nearest.st);
+  };
+
   useEffect(() => {
     let dead = false;
     loadLeaflet().then((L) => {
@@ -3603,7 +3625,12 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         findLayer: L.layerGroup().addTo(map), compLayer: L.layerGroup().addTo(map),
         lotCtrl: null, lotTimer: null, selLot: null, lotFeats: [] };
       map.on("zoomend", () => setZoom(map.getZoom()));
-      map.on("moveend", () => { setZoom(map.getZoom()); refreshLotsRef.current(); });
+      map.on("moveend", () => {
+        const z = map.getZoom();
+        setZoom(z);
+        refreshLotsRef.current();
+        if (z >= DOSSIER_ZOOM) { const c = map.getCenter(); focusDossierOn(c.lat, c.lng); }
+      });
       window.__msMap = map; // debug/test hook
       setZoom(map.getZoom());
       setReady(true);
@@ -3732,6 +3759,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     };
     setCard(cardObj);
     runComps(cardObj); // auto-comp the instant the parcel is selected — no button, no wait
+    focusDossierOn(cardObj.lat, cardObj.lng); // county dossier follows the selected/searched lot
   };
 
   const refreshLots = () => {
