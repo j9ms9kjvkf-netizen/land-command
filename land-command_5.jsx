@@ -828,7 +828,7 @@ function PipelineTab({ data, update, onOpenCallScripts }) {
       if (lead.status === "New" || lead.status === "Researching") patch.status = "Skip traced";
       save({ ...lead, ...patch });
     } catch (e) {
-      setTraceErr(p => ({ ...p, [lead.id]: (e && e.needsKey) ? "needsKey" : ((e && e.message) || "Skip trace failed — try again.") }));
+      setTraceErr(p => ({ ...p, [lead.id]: (e && e.needsKey) ? "needsKey" : (e && e.needsBilling) ? "needsBilling" : ((e && e.message) || "Skip trace failed — try again.") }));
     } finally {
       setTracing(p => ({ ...p, [lead.id]: false }));
     }
@@ -1047,6 +1047,15 @@ function PipelineTab({ data, update, onOpenCallScripts }) {
                             <Btn small onClick={() => saveTraceKey(l)}>Save &amp; trace</Btn>
                           </div>
                         </div>
+                      ) : err === "needsBilling" ? (
+                        <div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>Your key is saved and working — it's your Anthropic account that's out of credit</div>
+                          <div style={{ fontSize: 12, color: C.ink, lineHeight: 1.6, marginBottom: 8 }}>
+                            A brand-new API key starts at $0 balance until you add a payment method. Re-entering a key won't fix this — add billing at{" "}
+                            <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" style={{ color: C.orangeDark, fontWeight: 700 }}>console.anthropic.com → Settings → Billing</a>, then try again.
+                          </div>
+                          <Btn small onClick={() => runSkipTrace(l)}>{busy ? "Tracing…" : "↻ Try again"}</Btn>
+                        </div>
                       ) : (
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                           <div>
@@ -1067,7 +1076,12 @@ function PipelineTab({ data, update, onOpenCallScripts }) {
                         <span className="lc-label" style={{ marginBottom: 0 }}>Skip trace result · {l.skipTrace.tracedAt}{l.skipTrace.confidence && ` · ${l.skipTrace.confidence} confidence`}</span>
                         <Btn small kind="ghost" onClick={() => runSkipTrace(l)}>{busy ? "Re-tracing…" : "↻ Re-trace"}</Btn>
                       </div>
-                      {err && err !== "needsKey" && <div style={{ fontSize: 12, color: C.red, marginBottom: 6 }}>{err}</div>}
+                      {err === "needsBilling" && (
+                        <div style={{ fontSize: 12, color: C.ink, background: C.amberPale, border: `1px solid ${C.amber}`, borderRadius: 4, padding: 8, marginBottom: 6 }}>
+                          Your key works — your Anthropic account has no credit. Add billing at <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" style={{ color: C.orangeDark, fontWeight: 700 }}>console.anthropic.com → Settings → Billing</a>, then re-trace.
+                        </div>
+                      )}
+                      {err && err !== "needsKey" && err !== "needsBilling" && <div style={{ fontSize: 12, color: C.red, marginBottom: 6 }}>{err}</div>}
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
                         <div>
                           <div className="lc-label">Phones</div>
@@ -2780,7 +2794,16 @@ async function askClaude(prompt, aiKey) {
   }
   if (resJson && (resJson.type === "error" || resJson.error)) {
     const msg = (resJson.error && resJson.error.message) || "API returned an error.";
-    if (/api.?key|authentication|credit|billing/i.test(msg)) {
+    // A valid key with $0 credit balance is a VERY common new-account state and
+    // is a completely different fix (add billing) from a missing/bad key —
+    // conflating the two used to re-show "add your key" in an infinite loop
+    // even after a correct key was saved. Check credits/billing FIRST.
+    if (/credit|billing/i.test(msg)) {
+      const err = new Error(`Your Anthropic account has no credits — add a payment method at console.anthropic.com → Settings → Billing, then try again. (${msg})`);
+      err.needsBilling = true;
+      throw err;
+    }
+    if (/api.?key|authentication/i.test(msg)) {
       const err = new Error(aiKey ? `Your API key was rejected (${msg}) — check it below.` : "Add your Claude API key below to unlock live AI research.");
       err.needsKey = true;
       throw err;
@@ -2836,6 +2859,7 @@ function MarketScoutTab({ onCreateBox, data, update }) {
   const [error, setError] = useState("");
   const [lotFind, setLotFind] = useState(null); // {q, seq} → RadarMap flies to the lot + owner card
   const [needKey, setNeedKey] = useState(false);  // web version needs the user's Claude API key
+  const [needBilling, setNeedBilling] = useState(false); // key is valid but the account has $0 credits
   const [keyOpen, setKeyOpen] = useState(false);  // manual toggle for the key panel
   const [keyDraft, setKeyDraft] = useState("");
   const scoutHistory = (data && data.scout) ? data.scout : {};
@@ -2874,7 +2898,7 @@ function MarketScoutTab({ onCreateBox, data, update }) {
   const runScout = async (target, keyOverride) => {
     const market = (target || loc).trim();
     if (!market || loading) return;
-    setLoc(market); setLoading(true); setError(""); setReport(null);
+    setLoc(market); setLoading(true); setError(""); setReport(null); setNeedBilling(false);
     try {
       const prompt = `You are a real estate market intelligence analyst for a land wholesaler who sells vacant lots to home builders. Use web search to analyze "${market}" as a builder market. Look for: retail precursor chains (Starbucks, Chick-fil-A, Dollar General, AutoZone, hospitals) arriving ahead of homes; population growth; builder/permit activity; infrastructure projects; remaining raw land; and motivated seller potential (longtime owners, farmers, heirs).
 
@@ -2889,6 +2913,7 @@ Respond with ONLY a JSON object — no markdown fences, no preamble, no text aft
     } catch (e) {
       setError(`Scout failed: ${e.message || e}`);
       if (e.needsKey) setNeedKey(true);
+      if (e.needsBilling) setNeedBilling(true);
     } finally {
       setLoading(false);
     }
@@ -2934,6 +2959,16 @@ Respond with ONLY a JSON object — no markdown fences, no preamble, no text aft
                 onKeyDown={e => { if (e.key === "Enter") saveKey(); }} placeholder={hasKey ? "Key saved ✓ — paste a new one to replace it" : "sk-ant-…"} />
               <Btn onClick={saveKey}>{loc.trim() && !looksLikeLotQuery(loc) ? "Save & scout" : "Save key"}</Btn>
               {hasKey && <Btn kind="ghost" onClick={clearKey}>Remove key</Btn>}
+            </div>
+          </div>
+        )}
+
+        {needBilling && (
+          <div style={{ marginTop: 12, padding: 14, border: `2px dashed ${C.orange}`, borderRadius: 8, background: C.amberPale }}>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>Your key is saved and working — it's your Anthropic account that's out of credit</div>
+            <div style={{ fontSize: 12.5, color: C.ink, marginTop: 4, lineHeight: 1.6 }}>
+              A brand-new API key comes with a $0 balance until you add a payment method. Re-entering a key won't fix this — add billing at{" "}
+              <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" style={{ color: C.orangeDark, fontWeight: 700 }}>console.anthropic.com → Settings → Billing</a>, then hit Scout again.
             </div>
           </div>
         )}
@@ -3059,7 +3094,9 @@ function DelinquencyHubTab({ data, update, onGoImport }) {
       result.researchedAt = new Date().toISOString().slice(0, 10);
       update({ ...data, delinq: { ...(data.delinq || {}), [key]: result } });
     } catch (e) {
-      setErrors(p => ({ ...p, [key]: e && e.needsKey
+      setErrors(p => ({ ...p, [key]: e && e.needsBilling
+        ? "Your key is saved and working — your Anthropic account just has no credit. Add billing at console.anthropic.com → Settings → Billing, then research again."
+        : e && e.needsKey
         ? "Web version needs your Claude API key — add it in Market Scout (⚙ AI key button), then research again."
         : "Research failed — hit Research again in a few seconds." }));
     } finally {
