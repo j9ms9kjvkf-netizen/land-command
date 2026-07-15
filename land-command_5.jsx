@@ -713,10 +713,10 @@ function MatchTab({ data, update }) {
 /* ============================================================
    TAB 4 — Pipeline (owner leads + outreach tracking)
    ============================================================ */
-const STATUSES = ["New", "Researching", "Skip traced", "Contacted", "Negotiating", "Under contract", "Assigned", "Closed", "Dead"];
+const STATUSES = ["New", "Researching", "Skip traced", "Contacted", "Negotiating", "Agreement sent", "Under contract", "Assigned", "Closed", "Dead"];
 const STATUS_COLOR = {
   "New": C.blue, "Researching": C.blue, "Skip traced": C.amber, "Contacted": C.amber,
-  "Negotiating": C.orange, "Under contract": C.green, "Assigned": C.green, "Closed": C.green, "Dead": C.faint,
+  "Negotiating": C.orange, "Agreement sent": C.blue, "Under contract": C.green, "Assigned": C.green, "Closed": C.green, "Dead": C.faint,
 };
 
 const emptyLead = () => ({
@@ -724,8 +724,34 @@ const emptyLead = () => ({
   address: "", mailing: "", offer: "",
   source: "", phone: "", status: "New", buybox: "",
   texted: "", called: "", mailed: "", notes: "",
+  skipTrace: null, agreementSentAt: "",
   created: new Date().toISOString().slice(0, 10),
 });
+
+/* ============================================================
+   THE FUNNEL — Owner Found → Skip Traced → 3-Pt Contact →
+   Negotiating → Agreement Sent → Signed → Closed. One computed
+   stage per lead so the visual pipeline always matches reality
+   instead of relying on the free-text status dropdown alone.
+   ============================================================ */
+const FUNNEL_STEPS = [
+  { key: "found",       label: "Owner Found",    icon: "◎" },
+  { key: "traced",      label: "Skip Traced",    icon: "🔎" },
+  { key: "contact",     label: "3-Pt Contact",   icon: "☎" },
+  { key: "negotiating", label: "Negotiating",    icon: "💬" },
+  { key: "agreement",   label: "Agreement Sent", icon: "✍" },
+  { key: "signed",      label: "Signed",         icon: "🤝" },
+  { key: "closed",      label: "Closed",         icon: "🏁" },
+];
+function leadFunnelStep(l) {
+  if (l.status === "Closed" || l.status === "Assigned") return 6;
+  if (l.status === "Under contract") return 5;
+  if (l.agreementSentAt) return 4;
+  if (l.status === "Negotiating") return 3;
+  if (l.mailed || l.texted || l.called) return 2;
+  if (l.skipTrace) return 1;
+  return 0;
+}
 
 function LeadForm({ initial, buyboxes, onSave, onCancel }) {
   const [l, setL] = useState(initial);
@@ -768,20 +794,51 @@ function LeadForm({ initial, buyboxes, onSave, onCancel }) {
   );
 }
 
-function PipelineTab({ data, update }) {
+function PipelineTab({ data, update, onOpenCallScripts }) {
   const [editing, setEditing] = useState(null);
   const [filter, setFilter] = useState("All");
   const [scriptsFor, setScriptsFor] = useState(null); // lead id
   const [importMsg, setImportMsg] = useState("");
+  const [tracing, setTracing] = useState({});  // leadId -> true while skip trace is running
+  const [traceErr, setTraceErr] = useState({}); // leadId -> "needsKey" or an error message
+  const [keyDraft, setKeyDraft] = useState({}); // leadId -> draft API key text
   const save = (lead) => {
     const exists = data.leads.some(x => x.id === lead.id);
     const leads = exists ? data.leads.map(x => x.id === lead.id ? lead : x) : [lead, ...data.leads];
     update({ ...data, leads });
     setEditing(null);
   };
-  const touch = (lead, kind) => {
+  const setStage = (lead, patch) => save({ ...lead, ...patch });
+  const toggleTouch = (lead, kind) => {
     const today = new Date().toISOString().slice(0, 10);
-    save({ ...lead, [kind]: today, status: lead.status === "New" || lead.status === "Skip traced" ? "Contacted" : lead.status });
+    const wasSet = !!lead[kind];
+    const patch = { [kind]: wasSet ? "" : today };
+    if (!wasSet && (lead.status === "New" || lead.status === "Researching" || lead.status === "Skip traced")) patch.status = "Contacted";
+    save({ ...lead, ...patch });
+  };
+  const runSkipTrace = async (lead, keyOverride) => {
+    const key = keyOverride !== undefined ? keyOverride : getAiKey(data);
+    setTracing(p => ({ ...p, [lead.id]: true }));
+    setTraceErr(p => ({ ...p, [lead.id]: "" }));
+    try {
+      const trace = await skipTraceOwner(lead, key);
+      const patch = { skipTrace: trace };
+      if (!lead.phone && trace.phones[0]) patch.phone = trace.phones[0];
+      if (!lead.mailing && trace.mailing) patch.mailing = trace.mailing;
+      if (lead.status === "New" || lead.status === "Researching") patch.status = "Skip traced";
+      save({ ...lead, ...patch });
+    } catch (e) {
+      setTraceErr(p => ({ ...p, [lead.id]: (e && e.needsKey) ? "needsKey" : ((e && e.message) || "Skip trace failed — try again.") }));
+    } finally {
+      setTracing(p => ({ ...p, [lead.id]: false }));
+    }
+  };
+  const saveTraceKey = (lead) => {
+    const k = (keyDraft[lead.id] || "").trim();
+    if (!k) return;
+    update({ ...data, settings: { ...(data.settings || {}), aiKey: k } });
+    setKeyDraft(p => ({ ...p, [lead.id]: "" }));
+    runSkipTrace(lead, k);
   };
   const shown = data.leads.filter(l => filter === "All" || l.status === filter);
   const counts = STATUSES.reduce((a, s) => ({ ...a, [s]: data.leads.filter(l => l.status === s).length }), {});
@@ -874,7 +931,7 @@ function PipelineTab({ data, update }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 10 }}>
         <div>
           <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Owner pipeline</div>
-          <div style={{ fontSize: 13, color: C.faint }}>Every owner you find, every text/call/mailer you send — logged here so touches 4–7 actually happen.</div>
+          <div style={{ fontSize: 13, color: C.faint }}>Owner found → skip traced → 3-point contact → negotiating → agreement signed. One funnel, one card, no guessing what's next.</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {importMsg && <span style={{ fontSize: 12.5, fontWeight: 700, color: importMsg.includes("✓") ? C.green : C.red }}>{importMsg}</span>}
@@ -928,34 +985,179 @@ function PipelineTab({ data, update }) {
         </div>
       )}
       <div style={{ display: "grid", gap: 10 }}>
-        {shown.map(l => (
-          <div key={l.id} style={{ background: C.panel, border: `1px solid ${C.line}`, borderLeft: `5px solid ${STATUS_COLOR[l.status] || C.line}`, borderRadius: 8, padding: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ minWidth: 220 }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{l.owner || "Unknown owner"} {l.phone && <span className="lc-mono" style={{ fontSize: 12, color: C.blue }}> {l.phone}</span>}</div>
-                <div className="lc-mono" style={{ fontSize: 12, color: C.faint }}>
-                  {l.apn && `APN ${l.apn} · `}{l.county && `${l.county} Co · `}{l.zip && `${l.zip} · `}{l.acres && `${l.acres} ac · `}{l.price && `$${Number(l.price).toLocaleString()}`}
+        {shown.map(l => {
+          const step = leadFunnelStep(l);
+          const isDead = l.status === "Dead";
+          const allTouched = !!(l.mailed && l.texted && l.called);
+          const busy = !!tracing[l.id];
+          const err = traceErr[l.id] || "";
+          return (
+            <div key={l.id} style={{ background: C.panel, border: `1px solid ${C.line}`, borderLeft: `5px solid ${isDead ? C.faint : STATUS_COLOR[l.status] || C.line}`, borderRadius: 8, padding: 14, opacity: isDead ? 0.72 : 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 220 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{l.owner || "Unknown owner"} {l.phone && <span className="lc-mono" style={{ fontSize: 12, color: C.blue }}> {l.phone}</span>}</div>
+                  <div className="lc-mono" style={{ fontSize: 12, color: C.faint }}>
+                    {l.apn && `APN ${l.apn} · `}{l.county && `${l.county} Co · `}{l.zip && `${l.zip} · `}{l.acres && `${l.acres} ac · `}{l.price && `$${Number(l.price).toLocaleString()}`}
+                  </div>
+                  {(l.buybox || l.source) && <div style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>{l.buybox && `For: ${l.buybox}`}{l.buybox && l.source ? "  ·  " : ""}{l.source && `Source: ${l.source}`}</div>}
+                  {l.notes && <div style={{ fontSize: 12.5, color: C.ink, marginTop: 3 }}>{l.notes}</div>}
                 </div>
-                {(l.buybox || l.source) && <div style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>{l.buybox && `For: ${l.buybox}`}{l.buybox && l.source ? "  ·  " : ""}{l.source && `Source: ${l.source}`}</div>}
-                {l.notes && <div style={{ fontSize: 12.5, color: C.ink, marginTop: 3 }}>{l.notes}</div>}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: STATUS_COLOR[l.status] }}>{l.status}</span>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <Btn small kind="ghost" onClick={() => touch(l, "texted")}>✉ Texted{l.texted ? ` ${l.texted.slice(5)}` : ""}</Btn>
-                  <Btn small kind="ghost" onClick={() => touch(l, "called")}>☎ Called{l.called ? ` ${l.called.slice(5)}` : ""}</Btn>
-                  <Btn small kind="ghost" onClick={() => touch(l, "mailed")}>▣ Mailed{l.mailed ? ` ${l.mailed.slice(5)}` : ""}</Btn>
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Btn small onClick={() => setScriptsFor(scriptsFor === l.id ? null : l.id)}>{scriptsFor === l.id ? "▾ Hide texts & mailers" : "✉ Texts & Mailers"}</Btn>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                   <Btn small kind="ghost" onClick={() => setEditing({ ...l })}>Edit</Btn>
                   <Btn small kind="danger" onClick={() => update({ ...data, leads: data.leads.filter(x => x.id !== l.id) })}>Delete</Btn>
                 </div>
               </div>
+
+              {isDead ? (
+                <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", background: "#F4F4F0", border: `1px dashed ${C.line}`, borderRadius: 6, padding: 10 }}>
+                  <span style={{ fontSize: 12.5, color: C.faint, fontWeight: 600 }}>Marked dead — circumstances change, owners come back.</span>
+                  <Btn small kind="ghost" onClick={() => setStage(l, { status: "New" })}>↻ Reactivate</Btn>
+                </div>
+              ) : (
+                <>
+                  {/* THE FUNNEL — one glance tells you exactly where this owner stands */}
+                  <div style={{ display: "flex", gap: 4, overflowX: "auto", marginTop: 12, paddingBottom: 2 }}>
+                    {FUNNEL_STEPS.map((s, i) => {
+                      const done = i < step, active = i === step;
+                      return (
+                        <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 4, flex: "0 0 auto" }}>
+                          <div style={{
+                            display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 99,
+                            fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+                            background: active ? C.ink : done ? C.greenPale : "#F0F1EB",
+                            color: active ? "#fff" : done ? C.green : C.faint,
+                            border: `1px solid ${active ? C.ink : done ? C.green : C.line}`,
+                          }}>
+                            <span>{done ? "✓" : s.icon}</span>{s.label}
+                          </div>
+                          {i < FUNNEL_STEPS.length - 1 && <span style={{ color: done ? C.green : C.line, fontSize: 12 }}>—</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* STAGE 0 — no skip trace yet: the single next action */}
+                  {step === 0 && (
+                    <div style={{ marginTop: 12, background: C.amberPale, border: `1px solid ${C.amber}`, borderRadius: 6, padding: 12 }}>
+                      {err === "needsKey" ? (
+                        <div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Add your Claude API key to unlock skip trace (saved once, works everywhere in this app)</div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <input className="lc-input" type="password" style={{ flex: 1, minWidth: 200 }} value={keyDraft[l.id] || ""} onChange={e => setKeyDraft(p => ({ ...p, [l.id]: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") saveTraceKey(l); }} placeholder="sk-ant-…" />
+                            <Btn small onClick={() => saveTraceKey(l)}>Save &amp; trace</Btn>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>🔎 Find this owner's current phone, email &amp; mailing address</div>
+                            <div style={{ fontSize: 12, color: C.faint }}>They don't live at the property — skip trace before you spend a stamp or a call.</div>
+                            {err && <div style={{ fontSize: 12, color: C.red, marginTop: 4 }}>{err}</div>}
+                          </div>
+                          <Btn onClick={() => runSkipTrace(l)}>{busy ? "Tracing…" : "🔎 Skip trace owner"}</Btn>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Skip-trace result — phones / emails / mailing, once found */}
+                  {l.skipTrace && (
+                    <div style={{ marginTop: 12, background: "#FAFBF7", border: `1px solid ${C.line}`, borderRadius: 6, padding: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                        <span className="lc-label" style={{ marginBottom: 0 }}>Skip trace result · {l.skipTrace.tracedAt}{l.skipTrace.confidence && ` · ${l.skipTrace.confidence} confidence`}</span>
+                        <Btn small kind="ghost" onClick={() => runSkipTrace(l)}>{busy ? "Re-tracing…" : "↻ Re-trace"}</Btn>
+                      </div>
+                      {err && err !== "needsKey" && <div style={{ fontSize: 12, color: C.red, marginBottom: 6 }}>{err}</div>}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+                        <div>
+                          <div className="lc-label">Phones</div>
+                          {l.skipTrace.phones.length ? l.skipTrace.phones.map((p, i) => <div key={i}><a className="lc-link" href={`tel:${p.replace(/[^\d+]/g, "")}`}>{p}</a></div>) : <span style={{ fontSize: 12.5, color: C.faint }}>none found</span>}
+                        </div>
+                        <div>
+                          <div className="lc-label">Emails</div>
+                          {l.skipTrace.emails.length ? l.skipTrace.emails.map((e, i) => <div key={i}><a className="lc-link" href={`mailto:${e}`}>{e}</a></div>) : <span style={{ fontSize: 12.5, color: C.faint }}>none found</span>}
+                        </div>
+                        <div>
+                          <div className="lc-label">Current mailing address</div>
+                          <span style={{ fontSize: 12.5 }}>{l.skipTrace.mailing || "none found"}</span>
+                        </div>
+                      </div>
+                      {l.skipTrace.notes && <div style={{ fontSize: 12, color: C.faint, marginTop: 8, fontStyle: "italic" }}>{l.skipTrace.notes}</div>}
+                      <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>AI-assisted research from public records — verify a number or address before mailing or dialing.</div>
+                    </div>
+                  )}
+
+                  {/* 3-POINT CONTACT — Mailer · Text · Call, tap to mark done, "view script" to pull up the words */}
+                  {step >= 1 && step <= 2 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="lc-label" style={{ marginBottom: 6 }}>3-point contact — Mailer · Text · Call</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {[
+                          ["mailed", "▣ Mailer", () => setScriptsFor(l.id)],
+                          ["texted", "✉ Text", () => setScriptsFor(l.id)],
+                          ["called", "☎ Call", () => onOpenCallScripts && onOpenCallScripts()],
+                        ].map(([kind, label, viewScript]) => {
+                          const done = !!l[kind];
+                          return (
+                            <div key={kind} style={{ display: "flex", alignItems: "center", gap: 6, border: `1px solid ${done ? C.green : C.line}`, background: done ? C.greenPale : "#fff", borderRadius: 8, padding: "6px 10px" }}>
+                              <button type="button" onClick={() => toggleTouch(l, kind)}
+                                style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, color: done ? C.green : C.ink, padding: 0 }}>
+                                <span style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${done ? C.green : C.line}`, background: done ? C.green : "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#fff", flexShrink: 0 }}>{done ? "✓" : ""}</span>
+                                {label}{done ? ` · ${l[kind].slice(5)}` : ""}
+                              </button>
+                              <button type="button" onClick={viewScript} style={{ background: "none", border: "none", color: C.blue, fontSize: 11, fontWeight: 700, cursor: "pointer", textDecoration: "underline", padding: 0 }}>view script</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {allTouched && (
+                        <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", background: C.greenPale, border: `1px solid ${C.green}`, borderRadius: 6, padding: "8px 12px" }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: C.green }}>🎉 All 3 touches complete — ready to negotiate</span>
+                          <Btn small onClick={() => setStage(l, { status: "Negotiating" })}>Move to Negotiating →</Btn>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* NEGOTIATING → send the purchase agreement */}
+                  {step === 3 && (
+                    <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: C.amberPale, border: `1px solid ${C.amber}`, borderRadius: 6, padding: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>💬 In negotiation — got a number verbally agreed?</div>
+                      <Btn onClick={() => setStage(l, { agreementSentAt: new Date().toISOString().slice(0, 10), status: "Agreement sent" })}>✍ Mark purchase agreement sent</Btn>
+                    </div>
+                  )}
+
+                  {/* AGREEMENT SENT → awaiting signature */}
+                  {step === 4 && (
+                    <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: "#EAF0FA", border: `1px solid ${C.blue}`, borderRadius: 6, padding: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.blue }}>✍ Agreement sent {l.agreementSentAt} — awaiting signature</div>
+                      <Btn onClick={() => setStage(l, { status: "Under contract" })}>🤝 Mark signed — Under contract</Btn>
+                    </div>
+                  )}
+
+                  {/* SIGNED */}
+                  {step === 5 && (
+                    <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: C.greenPale, border: `1px solid ${C.green}`, borderRadius: 6, padding: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.green }}>🤝 Signed — under contract. Line up your buyer, then close.</div>
+                      <Btn small onClick={() => setStage(l, { status: "Closed" })}>🏁 Mark closed</Btn>
+                    </div>
+                  )}
+
+                  {/* CLOSED */}
+                  {step === 6 && (
+                    <div style={{ marginTop: 12, fontSize: 13, fontWeight: 700, color: C.green }}>🏁 Deal closed. Nice work.</div>
+                  )}
+
+                  <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <Btn small onClick={() => setScriptsFor(scriptsFor === l.id ? null : l.id)}>{scriptsFor === l.id ? "▾ Hide texts & mailers" : "✉ Texts & Mailers"}</Btn>
+                    <Btn small kind="ghost" onClick={() => setStage(l, { status: "Dead" })}>Mark dead</Btn>
+                  </div>
+                </>
+              )}
+              {scriptsFor === l.id && <ScriptsPanel lead={l} data={data} update={update} />}
             </div>
-            {scriptsFor === l.id && <ScriptsPanel lead={l} data={data} update={update} />}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -981,6 +1183,7 @@ export default function LandCommand() {
   const [data, setData] = useState({ buyboxes: [], leads: [] });
   const [loaded, setLoaded] = useState(false);
   const [prefillBox, setPrefillBox] = useState(null); // handoff: Market Scout → Buy Boxes
+  const [callScriptTarget, setCallScriptTarget] = useState(null); // handoff: Pipeline "Call" step → Call Scripts tab
   const [storageOk, setStorageOk] = useState(null);   // null=checking, true=auto-save on, false=unavailable
   const [backupOpen, setBackupOpen] = useState(false);
   const [restoreText, setRestoreText] = useState("");
@@ -1087,8 +1290,8 @@ export default function LandCommand() {
             {tab === "delinq" && <DelinquencyHubTab data={data} update={update} onGoImport={() => setTab("pipeline")} />}
             {tab === "match" && <MatchTab data={data} update={update} />}
             {tab === "pricing" && <PricingTab data={data} update={update} />}
-            {tab === "calls" && <CallScriptsTab settings={data.settings || {}} />}
-            {tab === "pipeline" && <PipelineTab data={data} update={update} />}
+            {tab === "calls" && <CallScriptsTab settings={data.settings || {}} initialScript={callScriptTarget} />}
+            {tab === "pipeline" && <PipelineTab data={data} update={update} onOpenCallScripts={() => { setCallScriptTarget("seller"); setTab("calls"); }} />}
           </>
         )}
       </div>
@@ -2366,8 +2569,8 @@ const CALL_SCRIPTS = {
    Dark "call mode" theme preserved from your original system.
    [YOUR NAME]/[PHONE]/[EMAIL] auto-fill from your saved info.
    ============================================================ */
-function CallScriptsTab({ settings }) {
-  const [activeScript, setActiveScript] = useState("builder");
+function CallScriptsTab({ settings, initialScript }) {
+  const [activeScript, setActiveScript] = useState(initialScript || "builder");
   const [activeStep, setActiveStep] = useState(0);
   const [checked, setChecked] = useState({});
 
@@ -2590,6 +2793,38 @@ async function askClaude(prompt, aiKey) {
   const match = fullText.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("Analysis came back unstructured — try again.");
   return JSON.parse(match[0].replace(/```json|```/g, "").trim());
+}
+
+/* ============================================================
+   SKIP TRACE — AI-assisted owner lookup, same Claude + web-search
+   pipe as Market Scout / Delinquency Hub. This is NOT a paid
+   skip-trace API (BatchSkipTracing, TLO, etc.) — it's live OSINT
+   (public/property records, courts, obituaries, directories,
+   socials) the same way a wholesaler would Google it by hand,
+   just automated. Always ships with a verify-before-mailing note.
+   ============================================================ */
+async function skipTraceOwner(lead, aiKey) {
+  const where = [lead.address, lead.county ? `${lead.county} County, FL` : "", lead.zip].filter(Boolean).join(", ");
+  const known = lead.mailing ? ` Their last known/mailing address on file is "${lead.mailing}".` : "";
+  const prompt = `You are a skip-tracing research assistant for a licensed land-acquisition business. Use web search (county property appraiser/tax records, court records, obituaries, whitepages-style people-search directories, social media, LinkedIn, business filings) to find CURRENT contact information for this vacant-land owner, who does not live at the property:
+
+Owner name: "${lead.owner || "unknown — infer from public property records for this parcel if possible"}"
+Property location: ${where || "unknown"}${lead.apn ? ` (APN/parcel ${lead.apn})` : ""}.${known}
+
+Find: up to 3 current phone numbers (best guess first), up to 2 email addresses, and their current confirmed mailing address (where they actually live now, if different from the property or from what's on file).
+
+Respond with ONLY a JSON object — no markdown fences, no preamble, no text after. Exact schema:
+{"phones":["(555) 123-4567"],"emails":["name@example.com"],"mailing":"123 Main St, City, ST 00000","confidence":"high"|"medium"|"low","notes":"1-2 sentences: what you found, where, and anything relevant (e.g. possible deceased owner / heirs, moved recently, business entity)."}
+Use empty arrays/strings for anything you can't find — never invent a phone number, email, or address.`;
+  const parsed = await askClaude(prompt, aiKey);
+  return {
+    phones: Array.isArray(parsed.phones) ? parsed.phones.filter(Boolean) : [],
+    emails: Array.isArray(parsed.emails) ? parsed.emails.filter(Boolean) : [],
+    mailing: String(parsed.mailing || "").trim(),
+    confidence: String(parsed.confidence || "").trim(),
+    notes: String(parsed.notes || "").trim(),
+    tracedAt: new Date().toISOString().slice(0, 10),
+  };
 }
 
 const SCOUT_SIGNALS = ["Retail Expansion", "Population Growth", "Builder Demand", "Infrastructure Signals", "Land Availability", "Motivated Seller Pool"];
