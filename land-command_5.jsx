@@ -3743,17 +3743,19 @@ async function scanLandSales(lat, lng) {
    COMPING ENGINE — subject lot vs recent nearby vacant-land
    sales from the FL cadastral. One bbox query (no server-side
    WHERE), then a strict match ladder relaxed only until at
-   least 3 comps qualify:
-     T1: ≤1.0 mi · sold ≤24 mo · size within ±25%
-     T2: ≤1.0 mi · ≤36 mo · ±50%
-     T3: ≤1.0 mi · ≤60 mo · 0.5–2×
-     T4: ≤1.4 mi · ≤60 mo · 0.5–2×   (last resort)
+   least 3 comps qualify. Age is capped at 24 mo on every tier
+   (fresh comps matter more than a wider size band); only
+   distance and size band relax, and distance never exceeds 3 mi:
+     T1: ≤2.5 mi · sold ≤12 mo · size within ±25%
+     T2: ≤2.5 mi · ≤24 mo · ±50%
+     T3: ≤3.0 mi · ≤24 mo · ±50%
+     T4: ≤3.0 mi · ≤24 mo · 0.5–2×   (last resort)
    ============================================================ */
 const COMP_TIERS = [
-  { mi: 1.0, mo: 24, lo: 0.75, hi: 1.33, label: "≤1 mi · 24 mo · size ±25%" },
-  { mi: 1.0, mo: 36, lo: 0.6,  hi: 1.67, label: "≤1 mi · 36 mo · size ±50%" },
-  { mi: 1.0, mo: 60, lo: 0.5,  hi: 2.0,  label: "≤1 mi · 60 mo · size 0.5–2×" },
-  { mi: 1.4, mo: 60, lo: 0.5,  hi: 2.0,  label: "≤1.4 mi · 60 mo · size 0.5–2×" },
+  { mi: 2.5, mo: 12, lo: 0.75, hi: 1.33, label: "≤2.5 mi · 12 mo · size ±25%" },
+  { mi: 2.5, mo: 24, lo: 0.6,  hi: 1.67, label: "≤2.5 mi · 24 mo · size ±50%" },
+  { mi: 3.0, mo: 24, lo: 0.6,  hi: 1.67, label: "≤3 mi · 24 mo · size ±50%" },
+  { mi: 3.0, mo: 24, lo: 0.5,  hi: 2.0,  label: "≤3 mi · 24 mo · size 0.5–2×" },
 ];
 
 // Normalize one parcel record into a comp candidate (or null if it doesn't qualify)
@@ -3809,12 +3811,14 @@ function compsFromFeatures(feats, subject) {
   return pickComps(pool, subject);
 }
 
-// FULL pass: dedicated ≤1 mi sweep from the server (background refinement).
+// FULL pass: dedicated ≤2.5-3 mi sweep from the server (background refinement).
 async function fetchLotComps(subject, wide) {
   const now = new Date(), yr = now.getFullYear();
-  // Dense areas resolve within 1.05 mi; the 1.45 mi pass (tier 4) only runs when
-  // the tight pass finds <3 comps — big boxes over dense suburbs time this server out.
-  const mi = wide ? 1.45 : 1.05, dlat = mi / 69, dlng = mi / (69 * Math.cos((subject.lat * Math.PI) / 180));
+  // Dense areas resolve within 2.55 mi; the 3.05 mi pass (tier 3/4) only runs when
+  // the tight pass finds <3 comps. A wider box means a slower query on the state's
+  // flaky server — timeout bumped to 55s (was 40s) to give it room; still fails
+  // gracefully into the retry UI rather than hanging indefinitely.
+  const mi = wide ? 3.05 : 2.55, dlat = mi / 69, dlng = mi / (69 * Math.cos((subject.lat * Math.PI) / 180));
   const params = new URLSearchParams({
     geometry: `${subject.lng - dlng},${subject.lat - dlat},${subject.lng + dlng},${subject.lat + dlat}`,
     geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
@@ -3822,7 +3826,7 @@ async function fetchLotComps(subject, wide) {
     returnCentroid: "true", returnGeometry: "false", resultRecordCount: "2000", f: "json",
   });
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 40000);
+  const timer = setTimeout(() => ctrl.abort(), 55000);
   let feats;
   try {
     const r = await fetch(`${FL_CADASTRAL}/query?${params}`, { signal: ctrl.signal });
@@ -4188,7 +4192,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
      Two speeds, same result shape:
        INSTANT — comp against parcels already sitting in the lot-lines cache
        (zero network — renders the moment the parcel is clicked).
-       BACKGROUND — a dedicated ≤1 mi sweep centered exactly on the subject,
+       BACKGROUND — a dedicated ≤2.5-3 mi sweep centered exactly on the subject,
        which quietly replaces the instant estimate once it lands (usually
        1-3s; the state server occasionally runs slower).
      compSeqRef guards against a stale background result landing after the
@@ -4232,7 +4236,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     try {
       let res = await fetchLotComps(subject);
       if (res.comps.length < 3) {
-        // thin inside 1 mile — widen the net once (rural areas: few parcels, fast query)
+        // thin inside 2.5 miles — widen the net once, up to 3 mi max (rural areas: few parcels, fast query)
         try { const wideRes = await fetchLotComps(subject, true); if (wideRes.comps.length > res.comps.length) res = wideRes; } catch (_) { /* keep tight result */ }
       }
       if (mySeq !== compSeqRef.current) return; // a newer selection superseded this
@@ -4431,7 +4435,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
             <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>Comp pull failed — the state parcel server hiccuped. Hit “↻ Re-run comps” again.</div>
           )}
           {comps.status === "empty" && (
-            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>No qualifying vacant-land sales within 1.4 mi / 5 yrs — thin market. Try the ⌖ sales scan for a wider read.</div>
+            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>No qualifying vacant-land sales within 3 mi / 24 mo — thin market. Try the ⌖ sales scan for a wider read.</div>
           )}
 
           {(comps.status === "done" || comps.status === "instant") && (
