@@ -3743,19 +3743,19 @@ async function scanLandSales(lat, lng) {
    COMPING ENGINE — subject lot vs recent nearby vacant-land
    sales from the FL cadastral. One bbox query (no server-side
    WHERE), then a strict match ladder relaxed only until at
-   least 3 comps qualify. Age is capped at 24 mo on every tier
+   least 3 comps qualify. Age is capped at 12 mo on every tier
    (fresh comps matter more than a wider size band); only
    distance and size band relax, and distance never exceeds 3 mi:
      T1: ≤2.5 mi · sold ≤12 mo · size within ±25%
-     T2: ≤2.5 mi · ≤24 mo · ±50%
-     T3: ≤3.0 mi · ≤24 mo · ±50%
-     T4: ≤3.0 mi · ≤24 mo · 0.5–2×   (last resort)
+     T2: ≤2.5 mi · ≤12 mo · ±50%
+     T3: ≤3.0 mi · ≤12 mo · ±50%
+     T4: ≤3.0 mi · ≤12 mo · 0.5–2×   (last resort)
    ============================================================ */
 const COMP_TIERS = [
   { mi: 2.5, mo: 12, lo: 0.75, hi: 1.33, label: "≤2.5 mi · 12 mo · size ±25%" },
-  { mi: 2.5, mo: 24, lo: 0.6,  hi: 1.67, label: "≤2.5 mi · 24 mo · size ±50%" },
-  { mi: 3.0, mo: 24, lo: 0.6,  hi: 1.67, label: "≤3 mi · 24 mo · size ±50%" },
-  { mi: 3.0, mo: 24, lo: 0.5,  hi: 2.0,  label: "≤3 mi · 24 mo · size 0.5–2×" },
+  { mi: 2.5, mo: 12, lo: 0.6,  hi: 1.67, label: "≤2.5 mi · 12 mo · size ±50%" },
+  { mi: 3.0, mo: 12, lo: 0.6,  hi: 1.67, label: "≤3 mi · 12 mo · size ±50%" },
+  { mi: 3.0, mo: 12, lo: 0.5,  hi: 2.0,  label: "≤3 mi · 12 mo · size 0.5–2×" },
 ];
 
 // Normalize one parcel record into a comp candidate (or null if it doesn't qualify)
@@ -4435,7 +4435,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
             <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>Comp pull failed — the state parcel server hiccuped. Hit “↻ Re-run comps” again.</div>
           )}
           {comps.status === "empty" && (
-            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>No qualifying vacant-land sales within 3 mi / 24 mo — thin market. Try the ⌖ sales scan for a wider read.</div>
+            <div style={{ ...mono, fontSize: 11.5, color: CC.amber, padding: "0 14px 12px" }}>No qualifying vacant-land sales within 3 mi / 12 mo — thin market. Try the ⌖ sales scan for a wider read.</div>
           )}
 
           {(comps.status === "done" || comps.status === "instant") && (
