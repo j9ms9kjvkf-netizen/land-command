@@ -2932,9 +2932,6 @@ Respond with ONLY a JSON object — no markdown fences, no preamble, no text aft
 
   return (
     <div>
-      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Market scout</div>
-      <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>The radar below ranks FL, TX, NC and TN counties on real building-permit data — click a hotspot for its demand dossier, scan live land sales around it (FL), or deep-scout it with web research. Type a county to scout the market, or paste an APN / FL property address to jump straight to that lot and its owner.</div>
-
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input className="lc-input" style={{ flex: 1, minWidth: 220 }} value={loc} onChange={e => setLoc(e.target.value)}
