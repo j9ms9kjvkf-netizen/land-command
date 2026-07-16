@@ -1446,6 +1446,7 @@ function PricingTab({ data, update }) {
   const fmt = (v) => isFinite(v) && !isNaN(v) ? "$" + Math.round(v).toLocaleString() : "—";
 
   const CMV = n(cmv);
+  const ppAcre = n(acres) > 0 ? CMV / n(acres) : 0;
   const offerLow = CMV * n(lowPct) / 100;
   const offerHigh = CMV * n(highPct) / 100;
   const investorValue = CMV * n(invPct) / 100;
@@ -1482,12 +1483,27 @@ function PricingTab({ data, update }) {
       {/* HERO — the one number that matters, with the offer range it produces */}
       <div style={{ background: `radial-gradient(ellipse at 20% -20%, #24352C 0%, ${C.ink} 60%)`, borderRadius: 16, padding: "24px 22px", color: "#fff", boxShadow: "0 12px 30px rgba(24,36,29,.25)" }}>
         <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>① What's this lot worth today? <span style={{ textTransform: "none", fontWeight: 400 }}>— comps, Zillow, or the county assessor</span></div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 32, fontWeight: 800, color: C.orange, fontFamily: "'Saira Condensed', sans-serif" }}>$</span>
-          <input type="number" value={cmv} onChange={e => setCmv(e.target.value)} placeholder="60,000"
-            style={{ flex: 1, minWidth: 0, maxWidth: 260, fontSize: 32, fontWeight: 800, padding: "6px 12px", borderRadius: 8,
-              background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", color: "#fff",
-              fontFamily: "'Saira Condensed', sans-serif" }} />
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 32, fontWeight: 800, color: C.orange, fontFamily: "'Saira Condensed', sans-serif" }}>$</span>
+            <input type="number" value={cmv} onChange={e => setCmv(e.target.value)} placeholder="60,000"
+              style={{ flex: 1, minWidth: 0, maxWidth: 220, fontSize: 32, fontWeight: 800, padding: "6px 12px", borderRadius: 8,
+                background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", color: "#fff",
+                fontFamily: "'Saira Condensed', sans-serif" }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label style={{ fontSize: 10.5, color: "#9DAB9F", textTransform: "uppercase", letterSpacing: ".08em" }}>Acres</label>
+            <input type="number" value={acres} onChange={e => setAcres(e.target.value)} placeholder="0.25"
+              style={{ width: 92, fontSize: 20, fontWeight: 700, padding: "6px 10px", borderRadius: 8,
+                background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", color: "#fff",
+                fontFamily: "'Saira Condensed', sans-serif" }} />
+          </div>
+          {ppAcre > 0 && (
+            <div style={{ marginLeft: "auto" }}>
+              <div style={{ fontSize: 10.5, color: "#9DAB9F", textTransform: "uppercase", letterSpacing: ".08em" }}>Price / acre</div>
+              <div className="lc-mono" style={{ fontSize: 20, fontWeight: 700, color: "#46C7F2" }}>{fmt(ppAcre)}/ac</div>
+            </div>
+          )}
         </div>
 
         {ready && (
@@ -1513,7 +1529,6 @@ function PricingTab({ data, update }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginTop: 12 }}>
         <Field label="Offer floor %"><input className="lc-input" type="number" value={lowPct} onChange={e => setLowPct(e.target.value)} /></Field>
         <Field label="Offer ceiling %"><input className="lc-input" type="number" value={highPct} onChange={e => setHighPct(e.target.value)} /></Field>
-        <Field label="Lot acres — optional"><input className="lc-input" type="number" value={acres} onChange={e => setAcres(e.target.value)} placeholder="0.25" /></Field>
         <Field label="Buyer pays %"><input className="lc-input" type="number" value={invPct} onChange={e => setInvPct(e.target.value)} /></Field>
       </div>
       <div style={{ fontSize: 11.5, color: C.faint, marginTop: 6 }}>Default: you offer 35–45% of value; your builder/investor buyer pays 65%. Adjust per market heat.</div>
