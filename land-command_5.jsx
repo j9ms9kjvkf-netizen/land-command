@@ -1436,7 +1436,6 @@ function PricingTab({ data, update }) {
   const [lowPct, setLowPct] = useState("35");
   const [highPct, setHighPct] = useState("45");
   const [invPct, setInvPct] = useState("65");
-  const [fee, setFee] = useState("10000");
   const [closing, setClosing] = useState("1500");
   const [holding, setHolding] = useState("500");
   const [bufferPct, setBufferPct] = useState("10");
@@ -1451,9 +1450,9 @@ function PricingTab({ data, update }) {
   const offerHigh = CMV * n(highPct) / 100;
   const investorValue = CMV * n(invPct) / 100;
   const buffer = investorValue * n(bufferPct) / 100;
-  const mao = investorValue - n(fee) - n(closing) - n(holding) - buffer;
+  const mao = investorValue - n(closing) - n(holding) - buffer;
   const gross = investorValue - offerHigh;
-  const net = gross - n(fee) - n(closing);
+  const net = gross - n(closing);
   const ready = CMV > 0;
 
   let grade = { label: "—", color: C.faint, bg: "#EEEFEA" };
@@ -1529,11 +1528,10 @@ function PricingTab({ data, update }) {
           </div>
 
           <button type="button" onClick={() => setAdvOpen(!advOpen)} style={{ marginTop: 14, background: "none", border: "none", color: C.blue, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>
-            {advOpen ? "▾ Hide fee / closing / holding / buffer" : "▸ Fee / closing / holding / buffer"}
+            {advOpen ? "▾ Hide closing / holding / buffer" : "▸ Closing / holding / buffer"}
           </button>
           {advOpen && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginTop: 10 }}>
-              <Field label="Assignment fee $"><input className="lc-input" type="number" value={fee} onChange={e => setFee(e.target.value)} /></Field>
               <Field label="Closing $"><input className="lc-input" type="number" value={closing} onChange={e => setClosing(e.target.value)} /></Field>
               <Field label="Holding $"><input className="lc-input" type="number" value={holding} onChange={e => setHolding(e.target.value)} /></Field>
               <Field label="Safety buffer %"><input className="lc-input" type="number" value={bufferPct} onChange={e => setBufferPct(e.target.value)} /></Field>
