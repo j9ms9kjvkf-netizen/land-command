@@ -1436,6 +1436,7 @@ function PricingTab({ data, update }) {
   const [lowPct, setLowPct] = useState("35");
   const [highPct, setHighPct] = useState("45");
   const [invPct, setInvPct] = useState("65");
+  const [invDollar, setInvDollar] = useState("");
   const [closing, setClosing] = useState("1500");
   const [holding, setHolding] = useState("500");
   const [bufferPct, setBufferPct] = useState("10");
@@ -1449,7 +1450,8 @@ function PricingTab({ data, update }) {
   const ppAcre = n(acres) > 0 ? CMV / n(acres) : 0;
   const offerLow = CMV * n(lowPct) / 100;
   const offerHigh = CMV * n(highPct) / 100;
-  const investorValue = CMV * n(invPct) / 100;
+  const usingDollarBuy = n(invDollar) > 0;
+  const investorValue = usingDollarBuy ? n(invDollar) : CMV * n(invPct) / 100;
   const buffer = investorValue * n(bufferPct) / 100;
   const mao = investorValue - n(closing) - n(holding) - buffer;
   const gross = investorValue - offerHigh;
@@ -1468,7 +1470,7 @@ function PricingTab({ data, update }) {
     const lead = {
       ...emptyLead(), acres, price: String(Math.round(investorValue)), offer: String(Math.round(offerLow)),
       source: "Pricing Calc",
-      notes: `CMV ${fmt(CMV)} · Offer range ${fmt(offerLow)}–${fmt(offerHigh)} (${lowPct}–${highPct}% of value) · Buyer pays ${fmt(investorValue)} (${invPct}%) · MAO ${fmt(mao)} · Spread ${fmt(net)}`,
+      notes: `CMV ${fmt(CMV)} · Offer range ${fmt(offerLow)}–${fmt(offerHigh)} (${lowPct}–${highPct}% of value) · Buyer pays ${fmt(investorValue)}${usingDollarBuy ? "" : ` (${invPct}%)`} · MAO ${fmt(mao)} · Spread ${fmt(net)}`,
     };
     update({ ...data, leads: [lead, ...data.leads] });
     setSavedMsg("→ In Pipeline ✓");
@@ -1529,9 +1531,21 @@ function PricingTab({ data, update }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginTop: 12 }}>
         <Field label="Offer floor %"><input className="lc-input" type="number" value={lowPct} onChange={e => setLowPct(e.target.value)} /></Field>
         <Field label="Offer ceiling %"><input className="lc-input" type="number" value={highPct} onChange={e => setHighPct(e.target.value)} /></Field>
-        <Field label="Buyer pays %"><input className="lc-input" type="number" value={invPct} onChange={e => setInvPct(e.target.value)} /></Field>
+        <Field label="Buyer pays" span={2}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, opacity: 1 }}>
+              <span style={{ fontSize: 13, color: C.faint, fontWeight: 700 }}>$</span>
+              <input className="lc-input" type="number" placeholder="e.g. 55,000" value={invDollar} onChange={e => setInvDollar(e.target.value)} />
+            </div>
+            <span style={{ fontSize: 12, color: C.faint, fontWeight: 700 }}>or</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, opacity: usingDollarBuy ? 0.4 : 1 }}>
+              <input className="lc-input" type="number" value={invPct} onChange={e => setInvPct(e.target.value)} />
+              <span style={{ fontSize: 13, color: C.faint, fontWeight: 700 }}>%</span>
+            </div>
+          </div>
+        </Field>
       </div>
-      <div style={{ fontSize: 11.5, color: C.faint, marginTop: 6 }}>Default: you offer 35–45% of value; your builder/investor buyer pays 65%. Adjust per market heat.</div>
+      <div style={{ fontSize: 11.5, color: C.faint, marginTop: 6 }}>Default: you offer 35–45% of value; your builder/investor buyer pays 65% — or type their exact cash offer instead.</div>
 
       {ready && (
         <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18, marginTop: 14 }}>
@@ -1555,7 +1569,7 @@ function PricingTab({ data, update }) {
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
             <Btn onClick={sendToPipeline}>→ Pipeline</Btn>
-            <Btn kind="ghost" onClick={async () => { await copyText(`CMV ${fmt(CMV)} · Offer ${fmt(offerLow)}–${fmt(offerHigh)} (${lowPct}–${highPct}%) · Buyer pays ${fmt(investorValue)} · MAO ${fmt(mao)} · Spread ${fmt(net)} · ${grade.label}`); setSavedMsg("⧉ Copied ✓"); setTimeout(() => setSavedMsg(""), 2000); }}>⧉ Copy</Btn>
+            <Btn kind="ghost" onClick={async () => { await copyText(`CMV ${fmt(CMV)} · Offer ${fmt(offerLow)}–${fmt(offerHigh)} (${lowPct}–${highPct}%) · Buyer pays ${fmt(investorValue)}${usingDollarBuy ? "" : ` (${invPct}%)`} · MAO ${fmt(mao)} · Spread ${fmt(net)} · ${grade.label}`); setSavedMsg("⧉ Copied ✓"); setTimeout(() => setSavedMsg(""), 2000); }}>⧉ Copy</Btn>
             {savedMsg && <span style={{ fontSize: 13, fontWeight: 700, color: C.green }}>{savedMsg}</span>}
           </div>
         </div>
