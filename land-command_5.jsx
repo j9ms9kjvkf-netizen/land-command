@@ -1267,7 +1267,7 @@ export default function LandCommand() {
         </div>
       </div>
       {/* Body */}
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "22px 20px 60px" }}>
+      <div style={tab === "scout" ? { maxWidth: 1600, margin: "0 auto", padding: "14px 20px 30px" } : { maxWidth: 1100, margin: "0 auto", padding: "22px 20px 60px" }}>
         {!loaded ? <div style={{ color: C.faint, fontSize: 14 }}>Loading your saved buy boxes and leads…</div> : (
           <>
             {tab === "home" && (
@@ -2930,50 +2930,48 @@ Respond with ONLY a JSON object — no markdown fences, no preamble, no text aft
   const county = report ? String(report.market || loc).split(",")[0].replace(/county/i, "").trim() : "";
   const state = report ? (String(report.market || loc).split(",")[1] || "").trim() : "";
 
+  const darkBtn = (col, solid) => ({
+    fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer",
+    padding: "9px 16px", borderRadius: 6, border: `1px solid ${col}`, background: solid ? col : "transparent",
+    color: solid ? CC.abyss : col, whiteSpace: "nowrap",
+  });
+
   return (
     <div>
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input className="lc-input" style={{ flex: 1, minWidth: 220 }} value={loc} onChange={e => setLoc(e.target.value)}
+      <div style={{ background: CC.void, border: `1px solid ${CC.edge}`, borderBottom: "none", borderRadius: "10px 10px 0 0", padding: 14 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input className="ms-dark-input" style={{ flex: 1, minWidth: 220 }} value={loc} onChange={e => setLoc(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") { if (looksLikeLotQuery(loc)) findLot(); else runScout(); } }}
             placeholder="County market — or an APN / property address to jump to a lot" />
-          <Btn onClick={() => findLot()} kind="ghost">⌖ Find lot</Btn>
-          <Btn onClick={() => runScout()}>{loading ? "Scouting…" : "Scout market ↗"}</Btn>
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: C.faint }}>Try:</span>
-          {["Hays County, TX", "Pasco County, FL", "St. Johns County, FL", "Maury County, TN", "Kaufman County, TX"].map(m => (
-            <button key={m} type="button" onClick={() => runScout(m)}
-              style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, border: `1px solid ${C.line}`, background: "#fff", color: C.ink, cursor: "pointer", fontWeight: 600 }}>{m}</button>
-          ))}
-          <button type="button" onClick={() => setKeyOpen(!keyOpen)}
-            style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px", borderRadius: 99, border: `1px solid ${hasKey ? C.green : C.line}`, background: "#fff", color: hasKey ? C.green : C.faint, cursor: "pointer", fontWeight: 600 }}>
+          <button type="button" onClick={() => findLot()} style={darkBtn(CC.cyan, false)}>⌖ Find lot</button>
+          <button type="button" onClick={() => runScout()} style={darkBtn(CC.phosphor, true)}>{loading ? "Scouting…" : "Scout market ↗"}</button>
+          <button type="button" onClick={() => setKeyOpen(!keyOpen)} style={darkBtn(hasKey ? CC.phosphor : CC.edge, false)}>
             {hasKey ? "⚙ AI key ✓" : "⚙ AI key"}
           </button>
         </div>
 
         {(needKey || keyOpen) && (
-          <div style={{ marginTop: 12, padding: 14, border: `2px dashed ${needKey ? C.orange : C.line}`, borderRadius: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>Claude API key — powers Deep Scout &amp; Delinquency research on the web</div>
-            <div style={{ fontSize: 12, color: C.faint, marginTop: 4, lineHeight: 1.5 }}>
-              The web version calls the AI with your own key. Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: C.orangeDark, fontWeight: 700 }}>console.anthropic.com → API keys</a> (a few dollars covers many scouts).
+          <div style={{ marginTop: 12, padding: 14, border: `2px dashed ${needKey ? CC.signal : CC.edge}`, borderRadius: 8, background: CC.moss }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: CC.stake }}>Claude API key — powers Deep Scout &amp; Delinquency research on the web</div>
+            <div style={{ fontSize: 12, color: CC.stakeDim, marginTop: 4, lineHeight: 1.5 }}>
+              The web version calls the AI with your own key. Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: CC.cyan, fontWeight: 700 }}>console.anthropic.com → API keys</a> (a few dollars covers many scouts).
               It's saved only in this browser — never in the app's code or on any server of ours. The mobile/desktop app doesn't need one.
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
-              <input className="lc-input" type="password" style={{ flex: 1, minWidth: 220 }} value={keyDraft} onChange={e => setKeyDraft(e.target.value)}
+              <input className="ms-dark-input" type="password" style={{ flex: 1, minWidth: 220 }} value={keyDraft} onChange={e => setKeyDraft(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") saveKey(); }} placeholder={hasKey ? "Key saved ✓ — paste a new one to replace it" : "sk-ant-…"} />
-              <Btn onClick={saveKey}>{loc.trim() && !looksLikeLotQuery(loc) ? "Save & scout" : "Save key"}</Btn>
-              {hasKey && <Btn kind="ghost" onClick={clearKey}>Remove key</Btn>}
+              <button type="button" onClick={saveKey} style={darkBtn(CC.phosphor, true)}>{loc.trim() && !looksLikeLotQuery(loc) ? "Save & scout" : "Save key"}</button>
+              {hasKey && <button type="button" onClick={clearKey} style={darkBtn(CC.edge, false)}>Remove key</button>}
             </div>
           </div>
         )}
 
         {needBilling && (
-          <div style={{ marginTop: 12, padding: 14, border: `2px dashed ${C.orange}`, borderRadius: 8, background: C.amberPale }}>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>Your key is saved and working — it's your Anthropic account that's out of credit</div>
-            <div style={{ fontSize: 12.5, color: C.ink, marginTop: 4, lineHeight: 1.6 }}>
+          <div style={{ marginTop: 12, padding: 14, border: `2px dashed ${CC.signal}`, borderRadius: 8, background: CC.moss }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: CC.stake }}>Your key is saved and working — it's your Anthropic account that's out of credit</div>
+            <div style={{ fontSize: 12.5, color: CC.stakeDim, marginTop: 4, lineHeight: 1.6 }}>
               A brand-new API key comes with a $0 balance until you add a payment method. Re-entering a key won't fix this — add billing at{" "}
-              <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" style={{ color: C.orangeDark, fontWeight: 700 }}>console.anthropic.com → Settings → Billing</a>, then hit Scout again.
+              <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" style={{ color: CC.cyan, fontWeight: 700 }}>console.anthropic.com → Settings → Billing</a>, then hit Scout again.
             </div>
           </div>
         )}
@@ -3277,6 +3275,9 @@ const CC_CSS = `
 @keyframes cc-blip { 0%,100% { opacity:.35;} 50% { opacity:1;} }
 .cc-actionrow { display:flex; align-items:center; gap:12px; padding:11px 13px; border:1px solid ${CC.edge}; border-radius:9px; background:${CC.moss}; transition: border-color .12s; }
 .cc-actionrow:hover { border-color:${CC.edgeLit}; }
+.ms-dark-input { background: rgba(255,255,255,.05); border: 1px solid ${CC.edge}; border-radius: 6px; padding: 9px 12px; font-size: 13px; color: ${CC.stake}; font-family: 'Inter', system-ui, sans-serif; }
+.ms-dark-input::placeholder { color: ${CC.stakeDim}; }
+.ms-dark-input:focus { outline: 2px solid ${CC.phosphor}; outline-offset: 0; border-color: ${CC.phosphor}; }
 @media (prefers-reduced-motion: reduce) { .cc-dot,.cc-radar-sweep,.cc-blip { animation: none !important; } }
 `;
 
@@ -4274,7 +4275,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   });
 
   return (
-    <div style={{ marginTop: 14, background: CC.void, border: `1px solid ${CC.edge}`, borderRadius: 10, overflow: "hidden", color: CC.stake }}>
+    <div style={{ background: CC.void, border: `1px solid ${CC.edge}`, borderRadius: "0 0 10px 10px", overflow: "hidden", color: CC.stake }}>
       <style>{RADAR_CSS}</style>
 
       {/* header */}
@@ -4312,7 +4313,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
 
       {/* map + radar overlay */}
       <div style={{ position: "relative" }}>
-        <div ref={mapEl} className={"ms-map" + (tilesDead ? " ms-nogrid" : "")} style={{ height: "min(56vh, 520px)", minHeight: 360, zIndex: 0 }} />
+        <div ref={mapEl} className={"ms-map" + (tilesDead ? " ms-nogrid" : "")} style={{ height: "min(74vh, 820px)", minHeight: 420, zIndex: 0 }} />
         {mapErr && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: CC.abyss, zIndex: 600 }}>
             <div style={{ ...mono, fontSize: 12, color: CC.amber, textAlign: "center", padding: 20 }}>⚠ Live map unavailable ({mapErr}).<br />Hotspot rankings and dossiers below still run on real permit data.</div>
