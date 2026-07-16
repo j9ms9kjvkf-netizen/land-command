@@ -1533,14 +1533,14 @@ function PricingTab({ data, update }) {
         <Field label="Offer ceiling %"><input className="lc-input" type="number" value={highPct} onChange={e => setHighPct(e.target.value)} /></Field>
         <Field label="Buyer pays" span={2}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, opacity: 1 }}>
-              <span style={{ fontSize: 13, color: C.faint, fontWeight: 700 }}>$</span>
-              <input className="lc-input" type="number" placeholder="e.g. 55,000" value={invDollar} onChange={e => setInvDollar(e.target.value)} />
-            </div>
-            <span style={{ fontSize: 12, color: C.faint, fontWeight: 700 }}>or</span>
             <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, opacity: usingDollarBuy ? 0.4 : 1 }}>
               <input className="lc-input" type="number" value={invPct} onChange={e => setInvPct(e.target.value)} />
               <span style={{ fontSize: 13, color: C.faint, fontWeight: 700 }}>%</span>
+            </div>
+            <span style={{ fontSize: 12, color: C.faint, fontWeight: 700 }}>or</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
+              <span style={{ fontSize: 13, color: C.faint, fontWeight: 700 }}>$</span>
+              <input className="lc-input" type="number" placeholder="55,000" value={invDollar} onChange={e => setInvDollar(e.target.value)} />
             </div>
           </div>
         </Field>
