@@ -1181,15 +1181,15 @@ function PipelineTab({ data, update, onOpenCallScripts }) {
    App shell
    ============================================================ */
 const TABS = [
-  ["home", "Command"],
-  ["scout", "Market Scout"],
-  ["boxes", "Buy Boxes"],
-  ["find", "Find Deals"],
-  ["delinq", "Delinquency Hub"],
-  ["match", "Match a Parcel"],
-  ["pricing", "Pricing Calc"],
-  ["calls", "Call Scripts"],
-  ["pipeline", "Pipeline"],
+  ["home", "⌂", "Command"],
+  ["scout", "◎", "Scout"],
+  ["boxes", "▢", "Boxes"],
+  ["find", "⛏", "Find"],
+  ["delinq", "⚑", "Liens"],
+  ["match", "◈", "Match"],
+  ["pricing", "$", "Price"],
+  ["calls", "☎", "Calls"],
+  ["pipeline", "→", "Flow"],
 ];
 
 export default function LandCommand() {
@@ -1257,10 +1257,10 @@ export default function LandCommand() {
               ⛁ BACKUP
             </button>
           </div>
-          <div style={{ display: "flex", gap: 3, marginTop: 12, flexWrap: "wrap" }}>
-            {TABS.map(([id, label]) => (
+          <div style={{ display: "flex", gap: 6, marginTop: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            {TABS.map(([id, icon, label]) => (
               <button key={id} type="button" onClick={() => setTab(id)} className={"cc-tab lc-display" + (tab === id ? " cc-tab-on" : "")}>
-                {label}
+                <span className="cc-tab-ic">{icon}</span>{label}
               </button>
             ))}
           </div>
@@ -1433,139 +1433,120 @@ function ScriptsPanel({ lead, data, update }) {
 function PricingTab({ data, update }) {
   const [cmv, setCmv] = useState("");
   const [acres, setAcres] = useState("");
-  const [comps, setComps] = useState([{ price: "", acres: "" }, { price: "", acres: "" }, { price: "", acres: "" }]);
-  const [myPct, setMyPct] = useState("35");
+  const [lowPct, setLowPct] = useState("35");
+  const [highPct, setHighPct] = useState("45");
   const [invPct, setInvPct] = useState("65");
   const [fee, setFee] = useState("10000");
   const [closing, setClosing] = useState("1500");
   const [holding, setHolding] = useState("500");
   const [bufferPct, setBufferPct] = useState("10");
+  const [advOpen, setAdvOpen] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
 
   const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
   const fmt = (v) => isFinite(v) && !isNaN(v) ? "$" + Math.round(v).toLocaleString() : "—";
-  const pct = (v) => n(cmv) > 0 ? ((v / n(cmv)) * 100).toFixed(1) + "% of CMV" : "";
-
-  const setComp = (i, k, v) => setComps(comps.map((c, j) => j === i ? { ...c, [k]: v } : c));
-  const validComps = comps.filter(c => n(c.price) > 0 && n(c.acres) > 0);
-  const avgPPA = validComps.length ? validComps.reduce((s, c) => s + n(c.price) / n(c.acres), 0) / validComps.length : 0;
-  const compCMV = avgPPA * n(acres);
 
   const CMV = n(cmv);
-  const myPrice = CMV * n(myPct) / 100;
+  const offerLow = CMV * n(lowPct) / 100;
+  const offerHigh = CMV * n(highPct) / 100;
   const investorValue = CMV * n(invPct) / 100;
   const buffer = investorValue * n(bufferPct) / 100;
   const mao = investorValue - n(fee) - n(closing) - n(holding) - buffer;
-  const gross = investorValue - myPrice;
+  const gross = investorValue - offerHigh;
   const net = gross - n(fee) - n(closing);
   const ready = CMV > 0;
 
   let grade = { label: "—", color: C.faint, bg: "#EEEFEA" };
   if (ready) {
-    if (myPrice > mao) grade = { label: "OVER MAO — PASS", color: C.red, bg: C.redPale };
-    else if (net >= 10000) grade = { label: "STRONG DEAL", color: C.green, bg: C.greenPale };
-    else if (net > 0) grade = { label: "THIN DEAL — TIGHTEN IT", color: C.amber, bg: C.amberPale };
-    else grade = { label: "NO SPREAD — PASS", color: C.red, bg: C.redPale };
+    if (offerHigh > mao) grade = { label: "OVER MAO", color: C.red, bg: C.redPale };
+    else if (net >= 10000) grade = { label: "STRONG", color: C.green, bg: C.greenPale };
+    else if (net > 0) grade = { label: "THIN — TIGHTEN", color: C.amber, bg: C.amberPale };
+    else grade = { label: "NO SPREAD", color: C.red, bg: C.redPale };
   }
 
   const sendToPipeline = () => {
     const lead = {
-      ...emptyLead(), acres, price: String(Math.round(investorValue)), offer: String(Math.round(myPrice)),
+      ...emptyLead(), acres, price: String(Math.round(investorValue)), offer: String(Math.round(offerLow)),
       source: "Pricing Calc",
-      notes: `CMV ${fmt(CMV)} · My Price ${fmt(myPrice)} (${myPct}%) · Investor ${fmt(investorValue)} (${invPct}%) · MAO ${fmt(mao)} · Net spread ${fmt(net)}`,
+      notes: `CMV ${fmt(CMV)} · Offer range ${fmt(offerLow)}–${fmt(offerHigh)} (${lowPct}–${highPct}% of value) · Buyer pays ${fmt(investorValue)} (${invPct}%) · MAO ${fmt(mao)} · Spread ${fmt(net)}`,
     };
     update({ ...data, leads: [lead, ...data.leads] });
-    setSavedMsg("Saved to Pipeline ✓ — open the lead and add owner/APN");
-    setTimeout(() => setSavedMsg(""), 5000);
+    setSavedMsg("→ In Pipeline ✓");
+    setTimeout(() => setSavedMsg(""), 4000);
   };
 
   return (
     <div>
-      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Pricing calculator</div>
-      <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Your repeatable valuation chain: CMV → My Price → Investor Value → MAO → spread. Run it on every lot before you name a number.</div>
+      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Pricing</div>
+      <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Type what it's worth. See what to offer. That's the whole tool.</div>
 
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18 }}>
-        <SectionHead>Step 1 — Current market value (CMV)</SectionHead>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <Field label="CMV ($) — from comps, Zillow, or assessor"><input className="lc-input" type="number" value={cmv} onChange={e => setCmv(e.target.value)} placeholder="60000" /></Field>
-          <Field label="Subject lot acres (for comps helper)"><input className="lc-input" type="number" value={acres} onChange={e => setAcres(e.target.value)} placeholder="0.25" /></Field>
+      {/* HERO — the one number that matters, with the offer range it produces */}
+      <div style={{ background: `radial-gradient(ellipse at 20% -20%, #24352C 0%, ${C.ink} 60%)`, borderRadius: 16, padding: "24px 22px", color: "#fff", boxShadow: "0 12px 30px rgba(24,36,29,.25)" }}>
+        <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>① What's this lot worth today? <span style={{ textTransform: "none", fontWeight: 400 }}>— comps, Zillow, or the county assessor</span></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 32, fontWeight: 800, color: C.orange, fontFamily: "'Saira Condensed', sans-serif" }}>$</span>
+          <input type="number" value={cmv} onChange={e => setCmv(e.target.value)} placeholder="60,000"
+            style={{ flex: 1, minWidth: 0, maxWidth: 260, fontSize: 32, fontWeight: 800, padding: "6px 12px", borderRadius: 8,
+              background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", color: "#fff",
+              fontFamily: "'Saira Condensed', sans-serif" }} />
         </div>
-        <div style={{ marginTop: 12, background: "#FAFBF7", border: `1px dashed ${C.line}`, borderRadius: 6, padding: 12 }}>
-          <div className="lc-label">Comps helper (optional) — sold lots, same zip, last 12 mo</div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {comps.map((c, i) => {
-              const ppa = n(c.price) > 0 && n(c.acres) > 0 ? n(c.price) / n(c.acres) : 0;
-              return (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px", gap: 8, alignItems: "center" }}>
-                  <input className="lc-input" type="number" placeholder={`Comp ${i + 1} sold price ($)`} value={c.price} onChange={e => setComp(i, "price", e.target.value)} />
-                  <input className="lc-input" type="number" placeholder="Acres" value={c.acres} onChange={e => setComp(i, "acres", e.target.value)} />
-                  <span className="lc-mono" style={{ fontSize: 12, color: ppa ? C.green : C.faint, fontWeight: 600 }}>{ppa ? `$${Math.round(ppa).toLocaleString()}/ac` : "—"}</span>
-                </div>
-              );
-            })}
-          </div>
-          {compCMV > 0 && (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
-              <span className="lc-mono" style={{ fontSize: 13, fontWeight: 600 }}>Comp-based CMV: {fmt(compCMV)}</span>
-              <Btn small onClick={() => setCmv(String(Math.round(compCMV)))}>Use as CMV →</Btn>
+
+        {ready && (
+          <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,.12)" }}>
+            <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 10 }}>② Your offer to the seller — {lowPct}%–{highPct}% of value</div>
+            <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "baseline" }}>
+              <div>
+                <div style={{ fontSize: 10.5, color: "#9DAB9F", textTransform: "uppercase", letterSpacing: ".08em" }}>Open at</div>
+                <div className="lc-mono" style={{ fontSize: 28, fontWeight: 700, color: C.orange }}>{fmt(offerLow)}</div>
+              </div>
+              <span style={{ color: "#5B6B5D", fontSize: 22 }}>→</span>
+              <div>
+                <div style={{ fontSize: 10.5, color: "#9DAB9F", textTransform: "uppercase", letterSpacing: ".08em" }}>Ceiling</div>
+                <div className="lc-mono" style={{ fontSize: 28, fontWeight: 700, color: "#fff" }}>{fmt(offerHigh)}</div>
+              </div>
+              <span className="lc-stamp" style={{ marginLeft: "auto", color: grade.color, fontSize: 12, background: grade.bg, borderRadius: 4, padding: "4px 10px" }}>{grade.label}</span>
             </div>
-          )}
-        </div>
-
-        <SectionHead>Step 2 — Your percentages</SectionHead>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-          <Field label="My Price % of CMV (offer to seller)"><input className="lc-input" type="number" value={myPct} onChange={e => setMyPct(e.target.value)} placeholder="35" /></Field>
-          <Field label="Investor Buy % of CMV (builder pays)"><input className="lc-input" type="number" value={invPct} onChange={e => setInvPct(e.target.value)} placeholder="65" /></Field>
-        </div>
-        <div style={{ fontSize: 11.5, color: C.faint, marginTop: 8 }}>Your model: offer sellers 30–50% of CMV; builders/investors typically buy at 60–70%. Adjust per market heat.</div>
-
-        <SectionHead>Step 3 — Costs & safety</SectionHead>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-          <Field label="Assignment fee target ($)"><input className="lc-input" type="number" value={fee} onChange={e => setFee(e.target.value)} /></Field>
-          <Field label="Closing costs ($)"><input className="lc-input" type="number" value={closing} onChange={e => setClosing(e.target.value)} /></Field>
-          <Field label="Holding costs ($)"><input className="lc-input" type="number" value={holding} onChange={e => setHolding(e.target.value)} /></Field>
-          <Field label="Safety buffer (% of Investor Value)"><input className="lc-input" type="number" value={bufferPct} onChange={e => setBufferPct(e.target.value)} /></Field>
-        </div>
+          </div>
+        )}
       </div>
 
+      {/* obvious, minimal knobs — no clutter */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginTop: 12 }}>
+        <Field label="Offer floor %"><input className="lc-input" type="number" value={lowPct} onChange={e => setLowPct(e.target.value)} /></Field>
+        <Field label="Offer ceiling %"><input className="lc-input" type="number" value={highPct} onChange={e => setHighPct(e.target.value)} /></Field>
+        <Field label="Lot acres — optional"><input className="lc-input" type="number" value={acres} onChange={e => setAcres(e.target.value)} placeholder="0.25" /></Field>
+        <Field label="Buyer pays %"><input className="lc-input" type="number" value={invPct} onChange={e => setInvPct(e.target.value)} /></Field>
+      </div>
+      <div style={{ fontSize: 11.5, color: C.faint, marginTop: 6 }}>Default: you offer 35–45% of value; your builder/investor buyer pays 65%. Adjust per market heat.</div>
+
       {ready && (
-        <div style={{ background: C.ink, borderRadius: 8, padding: 20, color: "#fff", marginTop: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
-            <div className="lc-display" style={{ fontSize: 16, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: C.orange }}>Deal breakdown</div>
-            <span className="lc-stamp" style={{ color: grade.color, fontSize: 14, background: grade.bg, borderRadius: 4 }}>{grade.label}</span>
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18, marginTop: 14 }}>
+          <div className="lc-label" style={{ marginBottom: 10 }}>③ The spread</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14 }}>
+            <div><div className="lc-label">Buyer pays</div><div className="lc-mono" style={{ fontSize: 21, fontWeight: 700 }}>{fmt(investorValue)}</div></div>
+            <div><div className="lc-label">MAO — never exceed</div><div className="lc-mono" style={{ fontSize: 21, fontWeight: 700, color: offerHigh > mao ? C.red : C.green }}>{fmt(mao)}</div></div>
+            <div><div className="lc-label">Your spread</div><div className="lc-mono" style={{ fontSize: 21, fontWeight: 700, color: net >= 10000 ? C.green : net > 0 ? C.amber : C.red }}>{fmt(net)}</div></div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14 }}>
-            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>CMV</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600 }}>{fmt(CMV)}</div></div>
-            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>My Price (offer seller)</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600, color: C.orange }}>{fmt(myPrice)}</div><div style={{ fontSize: 10.5, color: "#9DAB9F" }}>{pct(myPrice)}</div></div>
-            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>Investor Value (builder pays)</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600 }}>{fmt(investorValue)}</div><div style={{ fontSize: 10.5, color: "#9DAB9F" }}>{pct(investorValue)}</div></div>
-            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>MAO — never exceed</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600, color: myPrice > mao ? "#E8A6A0" : "#7FD8A4" }}>{fmt(mao)}</div><div style={{ fontSize: 10.5, color: "#9DAB9F" }}>{pct(mao)}</div></div>
-            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>Gross spread</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600 }}>{fmt(gross)}</div></div>
-            <div><div className="lc-label" style={{ color: "#9DAB9F" }}>Net spread (take-home)</div><div className="lc-mono" style={{ fontSize: 22, fontWeight: 600, color: net >= 10000 ? "#7FD8A4" : net > 0 ? "#F2CD88" : "#E8A6A0" }}>{fmt(net)}</div></div>
-          </div>
+
+          <button type="button" onClick={() => setAdvOpen(!advOpen)} style={{ marginTop: 14, background: "none", border: "none", color: C.blue, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+            {advOpen ? "▾ Hide fee / closing / holding / buffer" : "▸ Fee / closing / holding / buffer"}
+          </button>
+          {advOpen && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginTop: 10 }}>
+              <Field label="Assignment fee $"><input className="lc-input" type="number" value={fee} onChange={e => setFee(e.target.value)} /></Field>
+              <Field label="Closing $"><input className="lc-input" type="number" value={closing} onChange={e => setClosing(e.target.value)} /></Field>
+              <Field label="Holding $"><input className="lc-input" type="number" value={holding} onChange={e => setHolding(e.target.value)} /></Field>
+              <Field label="Safety buffer %"><input className="lc-input" type="number" value={bufferPct} onChange={e => setBufferPct(e.target.value)} /></Field>
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
-            <Btn onClick={sendToPipeline}>+ Save deal to Pipeline</Btn>
-            <Btn kind="ghost" onClick={async () => { await copyText(`CMV: ${fmt(CMV)}\nMy Price (${myPct}%): ${fmt(myPrice)}\nInvestor Value (${invPct}%): ${fmt(investorValue)}\nMAO: ${fmt(mao)}\nGross spread: ${fmt(gross)}\nNet spread: ${fmt(net)}\nGrade: ${grade.label}`); setSavedMsg("Breakdown copied ✓"); setTimeout(() => setSavedMsg(""), 2500); }}>Copy breakdown</Btn>
-            {savedMsg && <span style={{ fontSize: 13, fontWeight: 700, color: "#7FD8A4" }}>{savedMsg}</span>}
+            <Btn onClick={sendToPipeline}>→ Pipeline</Btn>
+            <Btn kind="ghost" onClick={async () => { await copyText(`CMV ${fmt(CMV)} · Offer ${fmt(offerLow)}–${fmt(offerHigh)} (${lowPct}–${highPct}%) · Buyer pays ${fmt(investorValue)} · MAO ${fmt(mao)} · Spread ${fmt(net)} · ${grade.label}`); setSavedMsg("⧉ Copied ✓"); setTimeout(() => setSavedMsg(""), 2000); }}>⧉ Copy</Btn>
+            {savedMsg && <span style={{ fontSize: 13, fontWeight: 700, color: C.green }}>{savedMsg}</span>}
           </div>
         </div>
       )}
-
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16, marginTop: 14 }}>
-        <div className="lc-label" style={{ marginBottom: 10 }}>Formula reference</div>
-        {[
-          ["My Price", "CMV × My Price %", "What you offer the motivated seller"],
-          ["Investor Value", "CMV × Investor Buy %", "What your cash buyer / builder will pay"],
-          ["MAO", "Investor Value − Assignment Fee − Closing − Holding − Buffer", "Your absolute ceiling — never exceed this"],
-          ["Gross Spread", "Investor Value − My Price", "Potential profit before fees"],
-          ["Net Spread", "Gross Spread − Assignment Fee − Closing Costs", "Your take-home on the deal"],
-        ].map(([name, formula, desc]) => (
-          <div key={name} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${C.line}` }}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>{name}</span>
-            <span className="lc-mono" style={{ fontSize: 12, color: C.green, margin: "0 8px" }}>{formula}</span>
-            <span style={{ fontSize: 12, color: C.faint }}>{desc}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -3239,18 +3220,26 @@ const CC = {
 };
 
 const CC_CSS = `
-.cc-header { position: relative; background: linear-gradient(180deg, ${CC.abyss} 0%, ${CC.void} 100%); border-bottom: 1px solid ${CC.edge}; overflow: hidden; }
+.cc-header { position: sticky; top: 0; z-index: 60; background: rgba(7,11,10,.62); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); border-bottom: 1px solid rgba(74,222,158,.14); box-shadow: 0 8px 32px rgba(0,0,0,.35); overflow: hidden; }
 .cc-contour { position: absolute; inset: 0; opacity: .5; pointer-events: none;
   background-image:
     repeating-radial-gradient(circle at 18% 140%, transparent 0 22px, rgba(74,222,158,.05) 22px 23px),
     repeating-radial-gradient(circle at 85% -40%, transparent 0 26px, rgba(70,199,242,.045) 26px 27px); }
 .cc-dot { width: 9px; height: 9px; border-radius: 50%; background: ${CC.phosphor}; box-shadow: 0 0 0 0 ${CC.phosphor}; animation: cc-pulse 2.4s infinite; flex-shrink: 0; }
 @keyframes cc-pulse { 0% { box-shadow: 0 0 0 0 rgba(74,222,158,.6);} 70% { box-shadow: 0 0 0 8px rgba(74,222,158,0);} 100% { box-shadow: 0 0 0 0 rgba(74,222,158,0);} }
-.cc-chip { font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; letter-spacing:.08em; padding:4px 11px; border-radius:3px; border:1px solid; cursor:pointer; }
-.cc-tab { padding: 9px 18px; border:1px solid transparent; border-bottom:none; cursor:pointer; font-weight:800; font-size:12.5px; letter-spacing:.1em; text-transform:uppercase;
-  background:transparent; color:${CC.stakeDim}; border-radius:6px 6px 0 0; transition: color .15s, background .15s; }
-.cc-tab:hover { color:${CC.stake}; background:${CC.moss}; }
-.cc-tab-on { background:${CC.void}; color:${CC.phosphor}; border-color:${CC.edge}; box-shadow: inset 0 2px 0 ${CC.phosphor}; }
+.cc-chip { font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; letter-spacing:.08em; padding:5px 12px; border-radius:99px; border:1px solid; cursor:pointer;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: transform .12s, box-shadow .12s; }
+.cc-chip:hover { transform: translateY(-1px); }
+.cc-tab { display: inline-flex; align-items: center; gap: 6px; padding: 8px 15px; border: 1px solid rgba(255,255,255,.06); cursor: pointer;
+  font-weight: 700; font-size: 12px; letter-spacing: .09em; text-transform: uppercase;
+  background: rgba(255,255,255,.03); color: ${CC.stakeDim}; border-radius: 99px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  transition: color .15s, background .15s, border-color .15s, box-shadow .15s, transform .15s; }
+.cc-tab:hover { color: ${CC.stake}; background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.12); transform: translateY(-1px); }
+.cc-tab-on { background: rgba(74,222,158,.12); color: ${CC.phosphor}; border-color: rgba(74,222,158,.4);
+  box-shadow: 0 0 0 1px rgba(74,222,158,.15), 0 0 18px rgba(74,222,158,.22); }
+.cc-tab-on:hover { background: rgba(74,222,158,.16); transform: none; }
+.cc-tab-ic { font-size: 13px; opacity: .9; }
 .cc-wrap { background: radial-gradient(ellipse at 50% -10%, ${CC.mossLit} 0%, ${CC.void} 55%, ${CC.abyss} 100%); border:1px solid ${CC.edge}; border-radius:14px; padding:0; overflow:hidden; color:${CC.stake}; }
 .cc-card { background:${CC.moss}; border:1px solid ${CC.edge}; border-radius:10px; padding:16px; }
 .cc-card:hover { border-color:${CC.edgeLit}; }
