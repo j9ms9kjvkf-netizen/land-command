@@ -3565,18 +3565,7 @@ const DOR_LABELS = {
   "4": "Condo", "8": "Multi-family <10", "10": "Vacant commercial", "40": "Vacant industrial",
   "50": "Cropland", "60": "Grazing land", "66": "Orchard/grove", "70": "Vacant institutional",
   "99": "Acreage — non-agricultural",
-  "11": "Store", "12": "Mixed use store/office", "13": "Department store", "14": "Supermarket/grocery",
-  "15": "Regional shopping center", "16": "Community shopping center", "19": "Professional service/medical office",
-  "21": "Restaurant", "22": "Fast food / drive-in restaurant", "23": "Bank/financial",
-  "26": "Service station", "27": "Auto sales/repair/service", "73": "Hospital, private",
 };
-
-// New-commercial-activity signal: same DOR codes as retail/auto/food/medical/hospital
-// (both zero-padded and bare forms — the live feed uses "011"-style strings, this covers either).
-const FL_BIZ_UC = [
-  "011", "11", "012", "12", "013", "13", "014", "14", "015", "15", "016", "16",
-  "019", "19", "021", "21", "022", "22", "023", "23", "026", "26", "027", "27", "073", "73",
-];
 function dorLabel(uc) {
   const raw = String(uc == null ? "" : uc).trim();
   if (!raw) return "";
@@ -3748,41 +3737,6 @@ async function scanLandSales(lat, lng) {
   return { sales, vacCount: vac.length, impCount: sales.length - vac.length, medPpa, parcels: feats.length };
 }
 
-/* New-business radar: same bbox-pull-no-WHERE pattern as scanLandSales, but
-   flags freshly-built retail/auto/food/medical/hospital parcels (DOR use code +
-   ACT_YR_BLT within the last 3 years) — the "AutoZone/Starbucks/urgent care just
-   went up on this corridor" signal, sourced straight from the FL cadastral,
-   no new data source needed. Piloted on Polk County's US-27 corridor. */
-async function scanNewBusiness(lat, lng) {
-  const yr = new Date().getFullYear();
-  const mi = 1.5, dlat = mi / 69, dlng = mi / (69 * Math.cos((lat * Math.PI) / 180));
-  const params = new URLSearchParams({
-    geometry: `${lng - dlng},${lat - dlat},${lng + dlng},${lat + dlat}`,
-    geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
-    outFields: "DOR_UC,ACT_YR_BLT,OWN_NAME,PHY_ADDR1,PHY_CITY,NCONST_VAL",
-    returnCentroid: "true", returnGeometry: "false", resultRecordCount: "2000", f: "json",
-  });
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 40000);
-  let feats;
-  try {
-    const r = await fetch(`${FL_CADASTRAL}/query?${params}`, { signal: ctrl.signal });
-    const j = await r.json();
-    feats = j.features || [];
-  } finally { clearTimeout(timer); }
-  const biz = feats.map((ft) => {
-    const c = ft.centroid, p = ft.attributes || {};
-    if (!c) return null;
-    const uc = String(p.DOR_UC || "").trim();
-    const yrBuilt = parseFloat(p.ACT_YR_BLT) || 0;
-    if (!FL_BIZ_UC.includes(uc) || !(yrBuilt >= yr - 3)) return null;
-    return { lat: c.y, lng: c.x, uc, ucLabel: dorLabel(uc), yrBuilt,
-      owner: String(p.OWN_NAME || "").trim(), addr: [String(p.PHY_ADDR1 || "").trim(), String(p.PHY_CITY || "").trim()].filter(Boolean).join(", "),
-      nconstVal: parseFloat(p.NCONST_VAL) || 0 };
-  }).filter(Boolean).sort((a, b) => b.yrBuilt - a.yrBuilt);
-  return { biz, parcels: feats.length };
-}
-
 /* ============================================================
    COMPING ENGINE — subject lot vs recent nearby vacant-land
    sales from the FL cadastral. One bbox query (no server-side
@@ -3910,17 +3864,13 @@ const RADAR_CSS = `
   font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .04em; transition: border-color .12s; }
 .ms-chip:hover { border-color: ${CC.phosphor}; }
 .ms-scroll { scrollbar-width: thin; scrollbar-color: ${CC.edge} transparent; }
-.ms-bolt { font-size: 20px; line-height: 1; color: var(--c); text-shadow: 0 0 6px var(--c), 0 0 14px var(--c); animation: ms-bolt-flash 1.1s ease-in-out infinite; }
-@keyframes ms-bolt-flash { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(1.2); } }
-@media (prefers-reduced-motion: reduce) { .ms-hot i, .ms-bolt { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .ms-hot i { animation: none !important; } }
 `;
 
 function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data, update, lotFind }) {
   const mapEl = React.useRef(null);
   const mapRef = React.useRef(null);
   const refreshLotsRef = React.useRef(() => {});
-  const refreshBizRef = React.useRef(() => {});
-  const bizSeqRef = React.useRef(0);
   const [ready, setReady] = useState(false);
   const [mapErr, setMapErr] = useState("");
   const [tilesDead, setTilesDead] = useState(false);
@@ -3929,7 +3879,6 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const [stFilter, setStFilter] = useState("FL"); // ranked-strip state filter
   const [sel, setSel] = useState(RADAR_HOTSPOTS.find((c) => c.st === "FL") || RADAR_HOTSPOTS[0]);
   const [scan, setScan] = useState(null);
-  const [bizScan, setBizScan] = useState(null); // new-business (fresh commercial construction) scan status
   const [lots, setLots] = useState(null);   // lot-lines fetch status
   const [card, setCard] = useState(null);   // selected parcel ownership card
   const [comps, setComps] = useState(null); // comp chart for the selected lot
@@ -3964,20 +3913,17 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         lotLayer: L.layerGroup().addTo(map), scanLayer: L.layerGroup().addTo(map),
         hotLayer: L.layerGroup().addTo(map), histLayer: L.layerGroup().addTo(map),
         findLayer: L.layerGroup().addTo(map), compLayer: L.layerGroup().addTo(map),
-        bizLayer: L.layerGroup().addTo(map),
-        lotCtrl: null, lotTimer: null, bizTimer: null, selLot: null, lotFeats: [] };
+        lotCtrl: null, lotTimer: null, selLot: null, lotFeats: [] };
       map.on("zoomend", () => setZoom(map.getZoom()));
       map.on("moveend", () => {
         const z = map.getZoom();
         setZoom(z);
         refreshLotsRef.current();
-        refreshBizRef.current();
         if (z >= DOSSIER_ZOOM) { const c = map.getCenter(); focusDossierOn(c.lat, c.lng); }
       });
       window.__msMap = map; // debug/test hook
       setZoom(map.getZoom());
       setReady(true);
-      refreshBizRef.current(); // first bolts on load — fitBounds' own moveend fires too early to catch
       setTimeout(() => map.invalidateSize(), 60);
     }).catch((e) => setMapErr(String((e && e.message) || e)));
     return () => { dead = true; if (mapRef.current) { mapRef.current.map.remove(); mapRef.current = null; } };
@@ -4063,37 +4009,6 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   };
 
   const clearScan = () => { const m = mapRef.current; if (m) m.scanLayer.clearLayers(); setScan(null); };
-
-  // New-business bolts follow the map automatically — no button, same spirit
-  // as the county hotspot blips. Debounced + sequence-guarded (like refreshLots)
-  // so a later pan always wins over a slow, now-stale FL-server response.
-  const refreshBizScan = () => {
-    const m = mapRef.current; if (!m) return;
-    clearTimeout(m.bizTimer);
-    m.bizTimer = setTimeout(() => {
-      const at = m.map.getCenter();
-      if (!inFlorida(at.lat, at.lng)) { m.bizLayer.clearLayers(); setBizScan({ status: "na" }); return; }
-      const mySeq = ++bizSeqRef.current;
-      setBizScan({ status: "loading" });
-      scanNewBusiness(at.lat, at.lng).then((res) => {
-        if (mySeq !== bizSeqRef.current) return; // a later pan superseded this
-        const m2 = mapRef.current; if (!m2) return;
-        m2.bizLayer.clearLayers();
-        res.biz.forEach((b) => {
-          const age = new Date().getFullYear() - b.yrBuilt;
-          const col = age <= 1 ? CC.signal : CC.amber;
-          const mk = m2.L.marker([b.lat, b.lng], {
-            icon: m2.L.divIcon({ html: `<div class="ms-bolt" style="--c:${col}">⚡</div>`, className: "ms-wrap", iconSize: [26, 26] }),
-            zIndexOffset: 500,
-          });
-          mk.bindTooltip(`⚡ ${b.ucLabel} · built ${b.yrBuilt}${b.addr ? " · " + b.addr : ""}${b.owner ? " · " + b.owner : ""}`, { className: "ms-tip" });
-          m2.bizLayer.addLayer(mk);
-        });
-        setBizScan({ status: "done", ...res });
-      }).catch(() => { if (mySeq === bizSeqRef.current) setBizScan({ status: "error" }); });
-    }, 900);
-  };
-  refreshBizRef.current = refreshBizScan;
 
   /* ---- lot lines: live viewport query on the statewide cadastral (owners included) ---- */
   const LOT_STYLE = { color: CC.phosphor, weight: 1, opacity: 0.85, fillColor: CC.phosphor, fillOpacity: 0.04 };
@@ -4409,11 +4324,6 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
             ⌖ SCANNING ~1.5 MI OF PARCELS FOR RECENT SALES…
           </div>
         )}
-        {bizScan && bizScan.status === "loading" && (
-          <div style={{ position: "absolute", top: scan && scan.status === "loading" ? 44 : 10, left: 10, zIndex: 600, ...mono, fontSize: 11, color: CC.signal, background: "rgba(7,11,10,.85)", border: `1px solid ${CC.edgeLit}`, borderRadius: 4, padding: "6px 12px" }}>
-            ⚡ SCANNING ~3 MI FOR FRESH COMMERCIAL BUILDS…
-          </div>
-        )}
 
         {/* lot finder status */}
         {finder && (
@@ -4425,7 +4335,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
 
         {/* lot-lines status */}
         {ready && !mapErr && (zoom >= 11 || lots) && (
-          <div style={{ position: "absolute", top: 10 + ((scan && scan.status === "loading") ? 34 : 0) + ((bizScan && bizScan.status === "loading") ? 34 : 0), left: 10, zIndex: 600, ...mono, fontSize: 10.5, background: "rgba(7,11,10,.85)", border: `1px solid ${CC.edge}`, borderRadius: 4, padding: "5px 10px",
+          <div style={{ position: "absolute", top: scan && scan.status === "loading" ? 44 : 10, left: 10, zIndex: 600, ...mono, fontSize: 10.5, background: "rgba(7,11,10,.85)", border: `1px solid ${CC.edge}`, borderRadius: 4, padding: "5px 10px",
             color: lots && lots.status === "loading" ? CC.cyan : lots && lots.status === "done" ? CC.phosphor : CC.stakeDim }}>
             {lots && lots.status === "na" ? "◻ LOT LINES & OWNERS: FLORIDA ONLY (MORE STATES NEXT)"
               : zoom < PARCEL_ZOOM ? `◻ ZOOM ${PARCEL_ZOOM - Math.floor(zoom)} MORE FOR LOT LINES + OWNERS`
@@ -4501,20 +4411,6 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
             </>
           )}
           <button type="button" onClick={clearScan} style={{ ...btnStyle(CC.stakeDim, false), marginLeft: "auto" }}>Clear</button>
-        </div>
-      )}
-
-      {bizScan && bizScan.status !== "loading" && (
-        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "10px 14px", borderTop: `1px solid ${CC.edge}`, background: CC.abyss }}>
-          {bizScan.status === "na" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>New-business bolts cover Florida only right now — TX / NC / TN parcel feeds are next.</span>}
-          {bizScan.status === "error" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Scan hiccuped on the state parcel server — will retry as you pan.</span>}
-          {bizScan.status === "done" && (
-            <>
-              <span style={{ ...mono, fontSize: 11.5, color: CC.signal, fontWeight: 700 }}>⚡ {bizScan.biz.length} fresh commercial build{bizScan.biz.length === 1 ? "" : "s"}</span>
-              <span style={{ ...mono, fontSize: 11.5, color: CC.stakeDim }}>stores · restaurants · auto · medical · hospital, built last 3 yrs · {bizScan.parcels.toLocaleString()} parcels swept, ~3 mi around map center</span>
-              {bizScan.biz.length === 0 && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Nothing fresh right here — still mostly raw land or built out a while ago. Keep panning.</span>}
-            </>
-          )}
         </div>
       )}
 
