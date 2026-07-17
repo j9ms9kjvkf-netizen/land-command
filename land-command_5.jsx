@@ -3919,6 +3919,8 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const mapEl = React.useRef(null);
   const mapRef = React.useRef(null);
   const refreshLotsRef = React.useRef(() => {});
+  const refreshBizRef = React.useRef(() => {});
+  const bizSeqRef = React.useRef(0);
   const [ready, setReady] = useState(false);
   const [mapErr, setMapErr] = useState("");
   const [tilesDead, setTilesDead] = useState(false);
@@ -3963,17 +3965,19 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         hotLayer: L.layerGroup().addTo(map), histLayer: L.layerGroup().addTo(map),
         findLayer: L.layerGroup().addTo(map), compLayer: L.layerGroup().addTo(map),
         bizLayer: L.layerGroup().addTo(map),
-        lotCtrl: null, lotTimer: null, selLot: null, lotFeats: [] };
+        lotCtrl: null, lotTimer: null, bizTimer: null, selLot: null, lotFeats: [] };
       map.on("zoomend", () => setZoom(map.getZoom()));
       map.on("moveend", () => {
         const z = map.getZoom();
         setZoom(z);
         refreshLotsRef.current();
+        refreshBizRef.current();
         if (z >= DOSSIER_ZOOM) { const c = map.getCenter(); focusDossierOn(c.lat, c.lng); }
       });
       window.__msMap = map; // debug/test hook
       setZoom(map.getZoom());
       setReady(true);
+      refreshBizRef.current(); // first bolts on load — fitBounds' own moveend fires too early to catch
       setTimeout(() => map.invalidateSize(), 60);
     }).catch((e) => setMapErr(String((e && e.message) || e)));
     return () => { dead = true; if (mapRef.current) { mapRef.current.map.remove(); mapRef.current = null; } };
@@ -4060,28 +4064,36 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
 
   const clearScan = () => { const m = mapRef.current; if (m) m.scanLayer.clearLayers(); setScan(null); };
 
-  const runBizScan = (lat, lng) => {
+  // New-business bolts follow the map automatically — no button, same spirit
+  // as the county hotspot blips. Debounced + sequence-guarded (like refreshLots)
+  // so a later pan always wins over a slow, now-stale FL-server response.
+  const refreshBizScan = () => {
     const m = mapRef.current; if (!m) return;
-    const at = lat != null ? { lat, lng } : m.map.getCenter();
-    if (!inFlorida(at.lat, at.lng)) { setBizScan({ status: "na" }); return; }
-    setBizScan({ status: "loading" });
-    m.bizLayer.clearLayers();
-    scanNewBusiness(at.lat, at.lng).then((res) => {
-      res.biz.forEach((b) => {
-        const age = new Date().getFullYear() - b.yrBuilt;
-        const col = age <= 1 ? CC.signal : CC.amber;
-        const mk = m.L.marker([b.lat, b.lng], {
-          icon: m.L.divIcon({ html: `<div class="ms-bolt" style="--c:${col}">⚡</div>`, className: "ms-wrap", iconSize: [26, 26] }),
-          zIndexOffset: 500,
+    clearTimeout(m.bizTimer);
+    m.bizTimer = setTimeout(() => {
+      const at = m.map.getCenter();
+      if (!inFlorida(at.lat, at.lng)) { m.bizLayer.clearLayers(); setBizScan({ status: "na" }); return; }
+      const mySeq = ++bizSeqRef.current;
+      setBizScan({ status: "loading" });
+      scanNewBusiness(at.lat, at.lng).then((res) => {
+        if (mySeq !== bizSeqRef.current) return; // a later pan superseded this
+        const m2 = mapRef.current; if (!m2) return;
+        m2.bizLayer.clearLayers();
+        res.biz.forEach((b) => {
+          const age = new Date().getFullYear() - b.yrBuilt;
+          const col = age <= 1 ? CC.signal : CC.amber;
+          const mk = m2.L.marker([b.lat, b.lng], {
+            icon: m2.L.divIcon({ html: `<div class="ms-bolt" style="--c:${col}">⚡</div>`, className: "ms-wrap", iconSize: [26, 26] }),
+            zIndexOffset: 500,
+          });
+          mk.bindTooltip(`⚡ ${b.ucLabel} · built ${b.yrBuilt}${b.addr ? " · " + b.addr : ""}${b.owner ? " · " + b.owner : ""}`, { className: "ms-tip" });
+          m2.bizLayer.addLayer(mk);
         });
-        mk.bindTooltip(`⚡ ${b.ucLabel} · built ${b.yrBuilt}${b.addr ? " · " + b.addr : ""}${b.owner ? " · " + b.owner : ""}`, { className: "ms-tip" });
-        m.bizLayer.addLayer(mk);
-      });
-      setBizScan({ status: "done", ...res });
-    }).catch(() => setBizScan({ status: "error" }));
+        setBizScan({ status: "done", ...res });
+      }).catch(() => { if (mySeq === bizSeqRef.current) setBizScan({ status: "error" }); });
+    }, 900);
   };
-
-  const clearBizScan = () => { const m = mapRef.current; if (m) m.bizLayer.clearLayers(); setBizScan(null); };
+  refreshBizRef.current = refreshBizScan;
 
   /* ---- lot lines: live viewport query on the statewide cadastral (owners included) ---- */
   const LOT_STYLE = { color: CC.phosphor, weight: 1, opacity: 0.85, fillColor: CC.phosphor, fillOpacity: 0.04 };
@@ -4359,7 +4371,6 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button type="button" onClick={() => runScan()} style={btnStyle(CC.phosphor, false)}>⌖ Scan sales in view</button>
-          <button type="button" onClick={() => runBizScan()} style={btnStyle(CC.signal, false)}>⚡ New business in view</button>
           <button type="button" onClick={() => setBaseMode(baseMode === "auto" ? "dark" : baseMode === "dark" ? "sat" : "auto")} style={btnStyle(CC.cyan, false)}>
             {baseMode === "auto" ? `Auto · ${effBase === "sat" ? "satellite" : "dark"}` : baseMode === "dark" ? "Dark ops" : "Satellite"}
           </button>
@@ -4495,16 +4506,15 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
 
       {bizScan && bizScan.status !== "loading" && (
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "10px 14px", borderTop: `1px solid ${CC.edge}`, background: CC.abyss }}>
-          {bizScan.status === "na" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>New-business scans cover Florida only right now — TX / NC / TN parcel feeds are next.</span>}
-          {bizScan.status === "error" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Scan timed out — the state parcel server hiccuped. Try again.</span>}
+          {bizScan.status === "na" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>New-business bolts cover Florida only right now — TX / NC / TN parcel feeds are next.</span>}
+          {bizScan.status === "error" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Scan hiccuped on the state parcel server — will retry as you pan.</span>}
           {bizScan.status === "done" && (
             <>
               <span style={{ ...mono, fontSize: 11.5, color: CC.signal, fontWeight: 700 }}>⚡ {bizScan.biz.length} fresh commercial build{bizScan.biz.length === 1 ? "" : "s"}</span>
-              <span style={{ ...mono, fontSize: 11.5, color: CC.stakeDim }}>stores · restaurants · auto · medical · hospital, built last 3 yrs · {bizScan.parcels.toLocaleString()} parcels swept, ~3 mi window</span>
-              {bizScan.biz.length === 0 && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Nothing fresh in this window — still mostly raw land or built out a while ago. Pan and rescan.</span>}
+              <span style={{ ...mono, fontSize: 11.5, color: CC.stakeDim }}>stores · restaurants · auto · medical · hospital, built last 3 yrs · {bizScan.parcels.toLocaleString()} parcels swept, ~3 mi around map center</span>
+              {bizScan.biz.length === 0 && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Nothing fresh right here — still mostly raw land or built out a while ago. Keep panning.</span>}
             </>
           )}
-          <button type="button" onClick={clearBizScan} style={{ ...btnStyle(CC.stakeDim, false), marginLeft: "auto" }}>Clear</button>
         </div>
       )}
 
