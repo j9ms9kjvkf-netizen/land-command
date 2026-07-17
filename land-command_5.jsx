@@ -3910,7 +3910,9 @@ const RADAR_CSS = `
   font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .04em; transition: border-color .12s; }
 .ms-chip:hover { border-color: ${CC.phosphor}; }
 .ms-scroll { scrollbar-width: thin; scrollbar-color: ${CC.edge} transparent; }
-@media (prefers-reduced-motion: reduce) { .ms-hot i { animation: none !important; } }
+.ms-bolt { font-size: 20px; line-height: 1; color: var(--c); text-shadow: 0 0 6px var(--c), 0 0 14px var(--c); animation: ms-bolt-flash 1.1s ease-in-out infinite; }
+@keyframes ms-bolt-flash { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(1.2); } }
+@media (prefers-reduced-motion: reduce) { .ms-hot i, .ms-bolt { animation: none !important; } }
 `;
 
 function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data, update, lotFind }) {
@@ -4062,14 +4064,16 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     const m = mapRef.current; if (!m) return;
     const at = lat != null ? { lat, lng } : m.map.getCenter();
     if (!inFlorida(at.lat, at.lng)) { setBizScan({ status: "na" }); return; }
-    if (lat == null && m.map.getZoom() < 11) { setBizScan({ status: "zoom" }); return; }
     setBizScan({ status: "loading" });
     m.bizLayer.clearLayers();
     scanNewBusiness(at.lat, at.lng).then((res) => {
       res.biz.forEach((b) => {
         const age = new Date().getFullYear() - b.yrBuilt;
         const col = age <= 1 ? CC.signal : CC.amber;
-        const mk = m.L.circleMarker([b.lat, b.lng], { radius: 7, color: col, weight: 2, fillColor: col, fillOpacity: 0.55 });
+        const mk = m.L.marker([b.lat, b.lng], {
+          icon: m.L.divIcon({ html: `<div class="ms-bolt" style="--c:${col}">⚡</div>`, className: "ms-wrap", iconSize: [26, 26] }),
+          zIndexOffset: 500,
+        });
         mk.bindTooltip(`⚡ ${b.ucLabel} · built ${b.yrBuilt}${b.addr ? " · " + b.addr : ""}${b.owner ? " · " + b.owner : ""}`, { className: "ms-tip" });
         m.bizLayer.addLayer(mk);
       });
@@ -4492,7 +4496,6 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       {bizScan && bizScan.status !== "loading" && (
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "10px 14px", borderTop: `1px solid ${CC.edge}`, background: CC.abyss }}>
           {bizScan.status === "na" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>New-business scans cover Florida only right now — TX / NC / TN parcel feeds are next.</span>}
-          {bizScan.status === "zoom" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Zoom into a spot first — each scan covers ~3 mi.</span>}
           {bizScan.status === "error" && <span style={{ ...mono, fontSize: 11.5, color: CC.amber }}>Scan timed out — the state parcel server hiccuped. Try again.</span>}
           {bizScan.status === "done" && (
             <>
