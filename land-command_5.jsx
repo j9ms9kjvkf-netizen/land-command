@@ -3987,13 +3987,15 @@ function compsFromFeatures(feats, subject) {
 }
 
 // FULL pass: dedicated ≤2.5-3 mi sweep from the server (background refinement).
-async function fetchLotComps(subject, wide) {
+async function fetchLotComps(subject) {
   const now = new Date(), yr = now.getFullYear();
-  // Dense areas resolve within 2.55 mi; the 3.05 mi pass (tier 3/4) only runs when
-  // the tight pass finds <3 comps. A wider box means a slower query on the state's
-  // flaky server — timeout bumped to 55s (was 40s) to give it room; still fails
-  // gracefully into the retry UI rather than hanging indefinitely.
-  const mi = wide ? 3.05 : 2.55, dlat = mi / 69, dlng = mi / (69 * Math.cos((subject.lat * Math.PI) / 180));
+  // Single pass at the widest tier radius (3.05 mi) — pickComps() still applies
+  // the full tier ladder client-side (2.5mi tiers checked first by real distance),
+  // so one bbox covering the max radius is all the network needs. Used to run a
+  // tight 2.55mi pass first and only widen on <3 comps, but that meant two
+  // sequential slow queries back-to-back whenever nearby vacant land was thin
+  // (the common case) — it looked hung, not just slow. One query fixes that.
+  const mi = 3.05, dlat = mi / 69, dlng = mi / (69 * Math.cos((subject.lat * Math.PI) / 180));
   const params = new URLSearchParams({
     geometry: `${subject.lng - dlng},${subject.lat - dlat},${subject.lng + dlng},${subject.lat + dlat}`,
     geometryType: "esriGeometryEnvelope", spatialRel: "esriSpatialRelIntersects", inSR: "4326", outSR: "4326",
@@ -4249,6 +4251,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       }
       if (m.lotCtrl) m.lotCtrl.abort();
       const ctrl = new AbortController(); m.lotCtrl = ctrl;
+      const timer = setTimeout(() => ctrl.abort(), 30000); // bounded wait — a hung/slow query used to sit on "Pulling lot lines…" forever
       setLots({ status: "loading" });
       const b = m.map.getBounds();
       const qs = new URLSearchParams({
@@ -4271,6 +4274,8 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         setLots({ status: "done", count: feats.length });
       } catch (e) {
         if (!ctrl.signal.aborted) setLots({ status: "error" });
+      } finally {
+        clearTimeout(timer);
       }
     }, 350);
   };
@@ -4409,11 +4414,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
 
     // BACKGROUND — dedicated sweep, replaces the instant estimate when done.
     try {
-      let res = await fetchLotComps(subject);
-      if (res.comps.length < 3) {
-        // thin inside 2.5 miles — widen the net once, up to 3 mi max (rural areas: few parcels, fast query)
-        try { const wideRes = await fetchLotComps(subject, true); if (wideRes.comps.length > res.comps.length) res = wideRes; } catch (_) { /* keep tight result */ }
-      }
+      const res = await fetchLotComps(subject);
       if (mySeq !== compSeqRef.current) return; // a newer selection superseded this
       if (!res.comps.length && hadInstant) return; // background found nothing — keep the instant estimate rather than blank it
       drawCompMarkers(mapRef.current, res);
