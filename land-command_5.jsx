@@ -4113,17 +4113,22 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     const m = mapRef.current; if (!ready || !m) return;
     if (m.tiles) m.map.removeLayer(m.tiles);
     if (m.labels) { m.map.removeLayer(m.labels); m.labels = null; }
+    // CARTO's free dark_all tiles now require an API key (they started serving a
+    // watermarked "API KEY REQUIRED" tile instead) — switched the dark basemap to
+    // Esri's Canvas/World_Dark_Gray_Base + Reference labels, same no-key ArcGIS
+    // Online domain already used for satellite imagery below, proven reliable here.
     const url = effBase === "sat"
       ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-      : "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-    m.tiles = m.L.tileLayer(url, { maxZoom: 19, subdomains: "abcd" });
+      : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+    m.tiles = m.L.tileLayer(url, { maxZoom: 19 });
     m.tiles.on("tileerror", () => setTilesDead(true));
     m.tiles.on("tileload", () => setTilesDead(false));
     m.tiles.addTo(m.map);
-    if (effBase === "sat") {
-      m.labels = m.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: 0.9 });
-      m.labels.addTo(m.map);
-    }
+    const labelsUrl = effBase === "sat"
+      ? "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+      : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
+    m.labels = m.L.tileLayer(labelsUrl, { maxZoom: 19, opacity: effBase === "sat" ? 0.9 : 0.85 });
+    m.labels.addTo(m.map);
   }, [ready, effBase]);
 
   // permit-demand hotspot blips
