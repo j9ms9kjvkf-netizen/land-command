@@ -3666,6 +3666,39 @@ function dorLabel(uc) {
   return DOR_LABELS[key] || `Use code ${raw}`;
 }
 
+/* ---- Teardown / lot-clearing cost chart (owner card) ----
+   LOW-END rates published on each company's own site, researched Nov 2026 — a
+   starting point for the price sheet, not a quote. The county roll does NOT say
+   frame vs block for homes (CONST_CLAS is 0 on residential), so Frame/Block is a
+   toggle that defaults by age. Block = frame +20% (low end of the 20–35% block
+   premium Florida Demolition Experts publishes). Priced on living area (footprint
+   isn't on the roll), which slightly overstates 2-story homes. */
+const DEMO_COMPANIES = [
+  { name: "PAW Demolition", phone: "(727) 862-5956", area: "Tampa Bay & Central FL", lat: 28.27, lng: -82.72, frame: 6.0, src: "pawdemo.com — homeowners usually pay $6–$10/sf" },
+  { name: "Demolition Pros", phone: "(850) 564-3366", area: "Pensacola & Panhandle", lat: 30.42, lng: -87.22, frame: 4.0, src: "demolitionpros.com — $4–$10/sf" },
+  { name: "Florida Demolition Experts", phone: "(954) 444-6643", area: "South Florida", lat: 26.12, lng: -80.14, frame: 6.0, src: "floridademolitionexperts.com — $6–$15/sf" },
+];
+const DEMO_BLOCK_PREMIUM = 1.2;
+const CLEAR_COMPANY = { name: "Florida Land Clearing", phone: "(813) 733-6607", area: "Statewide", min: 3000, src: "floridalandclearing.com — from $3,000 per machine day, 1-day minimum" };
+const telHref = (p) => "tel:+1" + String(p).replace(/\D/g, "");
+function milesBetween(lat1, lng1, lat2, lng2) {
+  const R = 3958.8, rad = Math.PI / 180, dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function teardownFor(card, pick) {
+  const uc = String(card.uc || "").replace(/^0+/, "");
+  if (["1", "2", "8"].includes(uc) && card.livAr > 0) {
+    const near = DEMO_COMPANIES.map((c) => ({ c, mi: milesBetween(card.lat, card.lng, c.lat, c.lng) })).sort((a, b) => a.mi - b.mi)[0];
+    const auto = (card.yrBuilt > 0 && card.yrBuilt < 1950) || uc === "2" ? "frame" : "block";
+    const type = pick || auto;
+    const rate = near.c.frame * (type === "block" ? DEMO_BLOCK_PREMIUM : 1);
+    return { kind: "home", type, rate, cost: Math.round((card.livAr * rate) / 100) * 100, co: near.c, mi: Math.round(near.mi), sf: card.livAr, impVal: Math.max(0, card.jv - card.lndVal), mobile: uc === "2" };
+  }
+  if (card.vacant) return { kind: "vacant", co: CLEAR_COMPANY };
+  return null;
+}
+
 // Point-in-polygon (ray cast) for picking the parcel under a geocoded address
 function pointInRing(x, y, ring) {
   let inside = false;
@@ -3972,6 +4005,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const refreshLotsRef = React.useRef(() => {});
   const gpsRef = React.useRef({ watchId: null, follow: false, fixed: false, dot: null, acc: null, lock: null });
   const [gps, setGps] = useState({ mode: "off" }); // off | locating | follow | free | error
+  const [demoPick, setDemoPick] = useState(null);   // null = auto frame/block guess, else "frame" | "block"
   const [ready, setReady] = useState(false);
   const [mapErr, setMapErr] = useState("");
   const [tilesDead, setTilesDead] = useState(false);
@@ -4238,8 +4272,10 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       jv, lndVal: parseFloat(p.LND_VAL) || 0,
       salePrice: price, saleYr: parseFloat(p.SALE_YR1) || 0, saleMo: s(p.SALE_MO1),
       yrBuilt: parseFloat(p.ACT_YR_BLT) || 0,
+      livAr: parseFloat(p.TOT_LVG_AR) || 0,
       sent: "",
     };
+    setDemoPick(null);
     setCard(cardObj);
     runComps(cardObj); // auto-comp the instant the parcel is selected — no button, no wait
     focusDossierOn(cardObj.lat, cardObj.lng); // county dossier follows the selected/searched lot
@@ -4454,7 +4490,13 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       price: card.jv > 0 ? String(Math.round(card.jv)) : "",
       address: card.site, mailing: [card.mail1, card.mail2].filter(Boolean).join(", "),
       source: "Market Radar map", lat: card.lat, lng: card.lng, pstate: "FL",
-      notes: `${card.ucLabel || ""}${card.vacant ? " (VACANT)" : ""}.${saleTxt} Pulled live from FL cadastral.`.trim(),
+      notes: `${card.ucLabel || ""}${card.vacant ? " (VACANT)" : ""}.${saleTxt}${(() => {
+        const t = teardownFor(card, demoPick);
+        if (!t) return "";
+        return t.kind === "home"
+          ? ` Est. teardown $${t.cost.toLocaleString()} (${t.type}, ${Math.round(t.sf).toLocaleString()} sf @ $${t.rate.toFixed(2)}/sf — ${t.co.name} ${t.co.phone}).`
+          : ` Lot clearing from $${t.co.min.toLocaleString()} (${t.co.name} ${t.co.phone}).`;
+      })()} Pulled live from FL cadastral.`.trim(),
     };
     update({ ...data, leads: [lead, ...(data.leads || [])] });
     setCard({ ...card, sent: "ok" });
@@ -4592,6 +4634,43 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
               )}
               {card.jv > 0 && <div style={{ fontSize: 12, color: CC.stakeDim }}>County just value ${Math.round(card.jv).toLocaleString()}{card.lndVal > 0 && card.lndVal !== card.jv ? ` · land $${Math.round(card.lndVal).toLocaleString()}` : ""}</div>}
             </div>
+            {(() => {
+              const t = teardownFor(card, demoPick);
+              if (!t) return null;
+              const lab = { ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".18em", color: CC.phosphorDim };
+              const call = <a href={telHref(t.co.phone)} style={{ color: CC.cyan, textDecoration: "none", fontWeight: 700 }}>☎ {t.co.phone}</a>;
+              const seg = (v) => (
+                <button type="button" key={v} onClick={() => setDemoPick(v)}
+                  style={{ ...mono, fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", cursor: "pointer", padding: "3px 9px",
+                    border: `1px solid ${t.type === v ? CC.amber : CC.edge}`, background: t.type === v ? "rgba(245,181,68,.14)" : "transparent", color: t.type === v ? CC.amber : CC.stakeDim,
+                    borderRadius: v === "frame" ? "4px 0 0 4px" : "0 4px 4px 0" }}>{v}</button>
+              );
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${CC.edge}` }}>
+                  {t.kind === "home" ? (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={lab}>TEARDOWN · EST.</span>
+                        <span style={{ display: "flex" }}>{seg("frame")}{seg("block")}</span>
+                      </div>
+                      <div style={{ ...mono, fontSize: 22, fontWeight: 800, color: CC.amber, marginTop: 5, lineHeight: 1.1 }}>${t.cost.toLocaleString()}</div>
+                      <div style={{ fontSize: 11.5, color: CC.stake, marginTop: 3 }}>{Math.round(t.sf).toLocaleString()} sf · ${t.rate.toFixed(2)}/sf{t.impVal > 0 && <span style={{ color: CC.stakeDim }}> · home value ${Math.round(t.impVal).toLocaleString()}</span>}</div>
+                      {t.mobile && <div style={{ fontSize: 10.5, color: CC.stakeDim, marginTop: 2 }}>Mobile home — priced at the frame rate.</div>}
+                    </>
+                  ) : (
+                    <>
+                      <span style={lab}>LOT CLEARING · EST.</span>
+                      <div style={{ ...mono, fontSize: 22, fontWeight: 800, color: CC.amber, marginTop: 5, lineHeight: 1.1 }}>from ${t.co.min.toLocaleString()}</div>
+                      <div style={{ fontSize: 11.5, color: CC.stake, marginTop: 3 }}>brush &amp; trees · 1 machine-day minimum</div>
+                    </>
+                  )}
+                  <div style={{ fontSize: 12, color: CC.stake, marginTop: 7 }}>{t.co.name} &nbsp; {call}</div>
+                  <div style={{ fontSize: 10.5, color: CC.stakeDim, marginTop: 2, lineHeight: 1.4 }}>
+                    {t.co.area} · lowest published rate — call to confirm scope &amp; price{t.mi > 120 ? ` · nearest on file is ~${t.mi} mi away` : ""}
+                  </div>
+                </div>
+              );
+            })()}
             <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
               <button type="button" onClick={() => runComps()} style={btnStyle(CC.cyan, false)}>
                 {!comps ? "⚖ Comp this lot"
