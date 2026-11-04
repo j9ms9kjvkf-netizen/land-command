@@ -1458,6 +1458,9 @@ function PricingTab({ data, update }) {
   const [bufferPct, setBufferPct] = useState("10");
   const [advOpen, setAdvOpen] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
+  const [cbValue, setCbValue] = useState("");   // 1M & Up custom builders: what comps prove new homes sell for
+  const [cbPct, setCbPct] = useState(20);       // 18–22% of that value = the lot price to the builder
+  const [cbCopied, setCbCopied] = useState(false);
 
   const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
   const fmt = (v) => isFinite(v) && !isNaN(v) ? "$" + Math.round(v).toLocaleString() : "—";
@@ -1590,6 +1593,56 @@ function PricingTab({ data, update }) {
           </div>
         </div>
       )}
+
+      {/* ── 1M & UP CUSTOM BUILDERS OFFER ── custom builders pay 18–22% of the finished home value on million-dollar lots */}
+      {(() => {
+        const home = n(cbValue), at = (p) => home * p / 100, price = at(cbPct);
+        const sub = { fontSize: 10.5, color: "#9DAB9F", textTransform: "uppercase", letterSpacing: ".08em" };
+        return (
+          <div style={{ marginTop: 34 }}>
+            <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>1M &amp; Up Custom Builders Offer</div>
+            <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Custom builders pay 18–22% of the finished home value on million-dollar lots. Slide to set your price.</div>
+            <div style={{ background: `radial-gradient(ellipse at 20% -20%, #2F2A1A 0%, ${C.ink} 60%)`, borderRadius: 16, padding: "24px 22px", color: "#fff", boxShadow: "0 12px 30px rgba(24,36,29,.25)" }}>
+              <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>① What do new homes sell for here? <span style={{ textTransform: "none", fontWeight: 400 }}>— from your comps</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 32, fontWeight: 800, color: "#F5B544", fontFamily: "'Saira Condensed', sans-serif" }}>$</span>
+                <input type="number" value={cbValue} onChange={e => setCbValue(e.target.value)} placeholder="5,000,000"
+                  style={{ flex: 1, minWidth: 0, maxWidth: 300, fontSize: 32, fontWeight: 800, padding: "6px 12px", borderRadius: 8,
+                    background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", color: "#fff", fontFamily: "'Saira Condensed', sans-serif" }} />
+              </div>
+              {home > 0 && home < 1000000 && <div style={{ fontSize: 11.5, color: "#F5B544", marginTop: 6 }}>Under $1M — this one is built for million-dollar areas.</div>}
+
+              <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,.12)" }}>
+                <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 10 }}>② Your price to the builder — <span style={{ color: "#F5B544" }}>{cbPct}%</span> of home value</div>
+                <input type="range" min={18} max={22} step={0.5} value={cbPct} onChange={e => setCbPct(parseFloat(e.target.value))}
+                  aria-label="Builder percentage, 18 to 22 percent" style={{ width: "100%", accentColor: "#F5B544", cursor: "pointer" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", ...sub, marginTop: 2 }}><span>18%</span><span>20%</span><span>22%</span></div>
+
+                <div style={{ marginTop: 16 }}>
+                  <div style={sub}>Selling price</div>
+                  <div className="lc-mono" style={{ fontSize: 34, fontWeight: 700, color: "#F5B544", lineHeight: 1.15 }}>{home > 0 ? fmt(price) : "—"}</div>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+                  {[18, 20, 22].map((p) => (
+                    <button key={p} type="button" onClick={() => setCbPct(p)}
+                      style={{ flex: "1 1 90px", textAlign: "left", cursor: "pointer", padding: "9px 12px", borderRadius: 8, color: "#fff",
+                        border: `1px solid ${cbPct === p ? "#F5B544" : "rgba(255,255,255,.18)"}`, background: cbPct === p ? "rgba(245,181,68,.14)" : "rgba(255,255,255,.04)" }}>
+                      <div style={sub}>{p}%</div>
+                      <div className="lc-mono" style={{ fontSize: 15, fontWeight: 700 }}>{home > 0 ? fmt(at(p)) : "—"}</div>
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <Btn kind="ghost" onClick={async () => { if (!(home > 0)) return; await copyText(`Custom builder offer — new homes sell ~${fmt(home)} · lot price at ${cbPct}%: ${fmt(price)} (range 18–22%: ${fmt(at(18))}–${fmt(at(22))})`); setCbCopied(true); setTimeout(() => setCbCopied(false), 2000); }}>⧉ Copy</Btn>
+                  {cbCopied && <span style={{ fontSize: 13, fontWeight: 700, color: "#7FD8A4" }}>⧉ Copied ✓</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
