@@ -1461,6 +1461,29 @@ function PricingTab({ data, update }) {
   const [cbValue, setCbValue] = useState("");   // 1M & Up custom builders: what comps prove new homes sell for
   const [cbPct, setCbPct] = useState(20);       // 18–22% of that value = the lot price to the builder
   const [cbCopied, setCbCopied] = useState(false);
+  // Demolition cost (existing home on the lot) — subtract from the asking price
+  const [dmZip, setDmZip] = useState("");
+  const [dmGeo, setDmGeo] = useState(null);     // zip → {status, city, st, lat, lng}
+  const [dmSf, setDmSf] = useState("");
+  const [dmType, setDmType] = useState("block");
+  const [dmPool, setDmPool] = useState(false);
+  const [dmAsk, setDmAsk] = useState("");
+  const [dmCopied, setDmCopied] = useState(false);
+  useEffect(() => {
+    const z = dmZip.trim();
+    if (!/^\d{5}$/.test(z)) { setDmGeo(null); return; }
+    let dead = false;
+    setDmGeo({ status: "loading" });
+    fetch(`https://api.zippopotam.us/us/${z}`)
+      .then((r) => { if (!r.ok) throw new Error("zip"); return r.json(); })
+      .then((j) => {
+        const p = j.places && j.places[0];
+        if (!p) throw new Error("zip");
+        if (!dead) setDmGeo({ status: "ok", city: p["place name"], st: p["state abbreviation"], lat: parseFloat(p.latitude), lng: parseFloat(p.longitude) });
+      })
+      .catch(() => { if (!dead) setDmGeo({ status: "err" }); });
+    return () => { dead = true; };
+  }, [dmZip]);
 
   const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
   const fmt = (v) => isFinite(v) && !isNaN(v) ? "$" + Math.round(v).toLocaleString() : "—";
@@ -1637,6 +1660,112 @@ function PricingTab({ data, update }) {
                 <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <Btn kind="ghost" onClick={async () => { if (!(home > 0)) return; await copyText(`Custom builder offer — new homes sell ~${fmt(home)} · lot price at ${cbPct}%: ${fmt(price)} (range 18–22%: ${fmt(at(18))}–${fmt(at(22))})`); setCbCopied(true); setTimeout(() => setCbCopied(false), 2000); }}>⧉ Copy</Btn>
                   {cbCopied && <span style={{ fontSize: 13, fontWeight: 700, color: "#7FD8A4" }}>⧉ Copied ✓</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── DEMOLITION COST ── existing home on the lot: type the ZIP, size, frame/block, pool → subtract from asking price */}
+      {(() => {
+        const sf = n(dmSf), ok = dmGeo && dmGeo.status === "ok";
+        const near = ok ? DEMO_COMPANIES.map((c) => ({ c, mi: milesBetween(dmGeo.lat, dmGeo.lng, c.lat, c.lng) })).sort((a, b) => a.mi - b.mi)[0] : null;
+        const baseRate = near ? near.c.frame : DEMO_COMPANIES[0].frame;           // no ZIP yet → Tampa Bay low-end rate
+        const rate = baseRate * (dmType === "block" ? DEMO_BLOCK_PREMIUM : 1);
+        const homeCost = sf > 0 ? Math.round((sf * rate) / 100) * 100 : 0;
+        const poolCost = dmPool ? POOL_FILL_COST : 0;
+        const demo = homeCost + poolCost;
+        const offerPrice = n(cbValue) * cbPct / 100;
+        const ask = dmAsk !== "" ? n(dmAsk) : offerPrice;
+        const sub = { fontSize: 10.5, color: "#9DAB9F", textTransform: "uppercase", letterSpacing: ".08em" };
+        const inputSt = { boxSizing: "border-box", minWidth: 0, fontSize: 24, fontWeight: 800, padding: "6px 12px", borderRadius: 8, background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.18)", color: "#fff", fontFamily: "'Saira Condensed', sans-serif" };
+        const seg = (val, cur, set, label, first) => (
+          <button type="button" key={label} onClick={() => set(val)}
+            style={{ flex: 1, cursor: "pointer", padding: "9px 14px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em",
+              border: `1px solid ${cur === val ? "#F5B544" : "rgba(255,255,255,.18)"}`, background: cur === val ? "rgba(245,181,68,.14)" : "rgba(255,255,255,.04)",
+              color: cur === val ? "#F5B544" : "#fff", borderRadius: first ? "8px 0 0 8px" : "0 8px 8px 0" }}>{label}</button>
+        );
+        const summary = `Demolition est. ${fmt(demo)} — ${sf > 0 ? `${Math.round(sf).toLocaleString()} sf ${dmType} @ $${rate.toFixed(2)}/sf = ${fmt(homeCost)}` : "no home"}${dmPool ? ` + pool fill ${fmt(poolCost)}` : ""}${ok ? ` · ${dmZip} (${dmGeo.city}, ${dmGeo.st}) · ${near.c.name} ${near.c.phone}` : ""}${ask > 0 ? ` · asking ${fmt(ask)} − demo = ${fmt(ask - demo)}` : ""}`;
+        return (
+          <div style={{ marginTop: 34 }}>
+            <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Demolition Cost</div>
+            <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Existing home on the lot? Estimate what it costs to clear it and take that off your asking price.</div>
+            <div style={{ background: `radial-gradient(ellipse at 20% -20%, #3A2419 0%, ${C.ink} 60%)`, borderRadius: 16, padding: "24px 22px", color: "#fff", boxShadow: "0 12px 30px rgba(24,36,29,.25)" }}>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <div style={{ flex: "0 0 140px" }}>
+                  <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>① ZIP code</div>
+                  <input inputMode="numeric" maxLength={5} value={dmZip} onChange={(e) => setDmZip(e.target.value.replace(/\D/g, "").slice(0, 5))} placeholder="33602" style={{ ...inputSt, width: "100%" }} />
+                </div>
+                <div style={{ flex: "1 1 180px" }}>
+                  <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>② Home size <span style={{ textTransform: "none", fontWeight: 400 }}>— sq ft</span></div>
+                  <input type="number" inputMode="numeric" value={dmSf} onChange={(e) => setDmSf(e.target.value)} placeholder="2,000" style={{ ...inputSt, width: "100%" }} />
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: "#9DAB9F", marginTop: 6, minHeight: 16 }}>
+                {dmGeo && dmGeo.status === "loading" && "Looking up ZIP…"}
+                {ok && <>📍 {dmGeo.city}, {dmGeo.st}</>}
+                {dmGeo && dmGeo.status === "err" && <span style={{ color: "#F5B544" }}>ZIP not found — using the Tampa Bay low-end rate.</span>}
+                {!dmGeo && "Add the ZIP to see the local demo company and phone — the price works without it."}
+              </div>
+
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 14 }}>
+                <div style={{ flex: "1 1 200px" }}>
+                  <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>③ Construction</div>
+                  <div style={{ display: "flex" }}>{seg("frame", dmType, setDmType, "Frame", true)}{seg("block", dmType, setDmType, "Block", false)}</div>
+                </div>
+                <div style={{ flex: "1 1 200px" }}>
+                  <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>④ Pool</div>
+                  <div style={{ display: "flex" }}>{seg(false, dmPool, setDmPool, "No pool", true)}{seg(true, dmPool, setDmPool, "Pool", false)}</div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 22, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,.12)" }}>
+                <div style={sub}>Estimated demolition cost</div>
+                <div className="lc-mono" style={{ fontSize: 34, fontWeight: 700, color: "#F5B544", lineHeight: 1.15 }}>{demo > 0 ? fmt(demo) : "—"}</div>
+                {demo > 0 && (
+                  <div style={{ fontSize: 12.5, color: "#C9D3CB", marginTop: 4, lineHeight: 1.5 }}>
+                    {sf > 0 && <>{Math.round(sf).toLocaleString()} sf × ${rate.toFixed(2)}/sf ({dmType}) = {fmt(homeCost)}</>}
+                    {sf > 0 && dmPool && " + "}
+                    {dmPool && <>pool fill-in {fmt(poolCost)}</>}
+                  </div>
+                )}
+                {near && (
+                  <div style={{ fontSize: 13, color: "#fff", marginTop: 10 }}>
+                    {near.c.name} &nbsp;
+                    <a href={telHref(near.c.phone)} style={{ color: "#7FD8A4", textDecoration: "none", fontWeight: 700 }}>☎ {near.c.phone}</a>
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: "#9DAB9F", marginTop: 4, lineHeight: 1.45 }}>
+                  {near ? `${near.c.area} · lowest published rate${near.mi > 120 ? ` · nearest on file is ~${Math.round(near.mi)} mi away` : ""} — call to confirm scope & price.` : "Lowest published Florida rates — call a local company to confirm."}
+                  {dmPool && " Pool: low end of partial fill-in (full removal costs more)."}
+                  {dmType === "block" && " Block = frame +20%."}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,.12)" }}>
+                <div className="lc-label" style={{ color: "#9DAB9F", marginBottom: 8 }}>⑤ Take it off your asking price</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 24, fontWeight: 800, color: "#F5B544", fontFamily: "'Saira Condensed', sans-serif" }}>$</span>
+                  <input type="number" inputMode="numeric" value={dmAsk} onChange={(e) => setDmAsk(e.target.value)} placeholder={offerPrice > 0 ? String(Math.round(offerPrice)) : "Asking price"} style={{ ...inputSt, flex: "1 1 160px", maxWidth: 240 }} />
+                  {dmAsk === "" && offerPrice > 0 && <span style={{ fontSize: 11.5, color: "#9DAB9F" }}>using your builder price above</span>}
+                </div>
+                {ask > 0 && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+                    <div style={{ flex: "1 1 120px", padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.04)" }}>
+                      <div style={sub}>Asking</div><div className="lc-mono" style={{ fontSize: 15, fontWeight: 700 }}>{fmt(ask)}</div>
+                    </div>
+                    <div style={{ flex: "1 1 120px", padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.04)" }}>
+                      <div style={sub}>− Demolition</div><div className="lc-mono" style={{ fontSize: 15, fontWeight: 700, color: "#FF8A80" }}>{fmt(demo)}</div>
+                    </div>
+                    <div style={{ flex: "1 1 120px", padding: "9px 12px", borderRadius: 8, border: "1px solid #F5B544", background: "rgba(245,181,68,.14)" }}>
+                      <div style={sub}>= Net price</div><div className="lc-mono" style={{ fontSize: 17, fontWeight: 700, color: "#F5B544" }}>{fmt(ask - demo)}</div>
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <Btn kind="ghost" onClick={async () => { if (!(demo > 0)) return; await copyText(summary); setDmCopied(true); setTimeout(() => setDmCopied(false), 2000); }}>⧉ Copy</Btn>
+                  {dmCopied && <span style={{ fontSize: 13, fontWeight: 700, color: "#7FD8A4" }}>⧉ Copied ✓</span>}
                 </div>
               </div>
             </div>
@@ -2476,6 +2605,8 @@ const DEMO_COMPANIES = [
   { name: "Florida Demolition Experts", phone: "(954) 444-6643", area: "South Florida", lat: 26.12, lng: -80.14, frame: 6.0, src: "floridademolitionexperts.com — $6–$15/sf" },
 ];
 const DEMO_BLOCK_PREMIUM = 1.2;
+// Pool fill-in (partial, in-ground): low end of published Tampa Bay / Angi ranges (~$3,000–$7,000); full removal runs $5,000–$15,000.
+const POOL_FILL_COST = 3000;
 const CLEAR_COMPANY = { name: "Florida Land Clearing", phone: "(813) 733-6607", area: "Statewide", min: 3000, src: "floridalandclearing.com — from $3,000 per machine day, 1-day minimum" };
 const telHref = (p) => "tel:+1" + String(p).replace(/\D/g, "");
 function milesBetween(lat1, lng1, lat2, lng2) {
