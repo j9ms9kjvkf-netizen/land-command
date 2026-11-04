@@ -222,6 +222,36 @@ function scoreParcel(p, b) {
 /* ---------------- Search link generator ---------------- */
 const g = (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 
+/* "Is this lot listed?" — one-click searches for a single parcel (lot card).
+   No listing site offers a free API, so these open the search; the user eyeballs it. */
+function listingLinksForLot(card) {
+  const street = (card.street || "").replace(/\s+/g, " ").trim();
+  const city = card.city || "";
+  const zip = card.zip || "";
+  const hasAddr = /[a-z]/i.test(street);
+  const exact = [];
+  if (hasAddr) {
+    const where = [street, city, "FL", zip].filter(Boolean).join(" ");
+    const slug = where.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
+    const q = `"${street}" ${city}`.trim();
+    exact.push(
+      { name: "Zillow", url: `https://www.zillow.com/homes/${slug}_rb/` },
+      { name: "Redfin", url: g(`site:redfin.com ${q}`) },
+      { name: "Realtor.com", url: g(`site:realtor.com ${q}`) },
+      { name: "LandWatch / Land.com", url: g(`(site:landwatch.com OR site:land.com OR site:landsearch.com) ${q}`) },
+      { name: "Any site", url: g(`${q} FL for sale`) },
+    );
+  }
+  if (card.apn) exact.push({ name: "By APN", url: g(`"${card.apn}" for sale`) });
+  const nearby = !zip ? [] : [
+    { name: "Zillow", url: `https://www.zillow.com/homes/for_sale/${zip}_rb/` },
+    { name: "Redfin land", url: `https://www.redfin.com/zipcode/${zip}/filter/property-type=land` },
+    { name: "LandSearch", url: `https://www.landsearch.com/properties/${zip}` },
+    { name: "FB Marketplace", url: `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent("vacant land " + zip)}` },
+  ];
+  return { exact, nearby, hasAddr };
+}
+
 function linksForBox(b) {
   const zips = splitList(b.zips);
   const counties = splitList(b.counties);
@@ -1651,7 +1681,7 @@ const BUYER_SELLER_SCRIPTS = {
             label: "Opening Line",
             color: "#22c55e",
             bg: "#0f2a1a",
-            text: `"Hey [NAME], this is [YOUR NAME] — I'll keep it quick. I'm a land acquisitions specialist and I focus on sourcing off-market vacant lots in specific markets before they ever list publicly. I've been building relationships with builders in [AREA/MARKET] and wanted to connect with you directly to understand what you're looking for — so if the right lot comes across my desk, you're already the first call I make."`,
+            text: `"Hey [NAME], this is [YOUR NAME] — I'll keep this quick. I'm a land acquisitions specialist, I focus on sourcing off-market vacant lots in specific markets before they list publicly. I've been building relationships with builders in [AREA/MARKET] and wanted to connect to understand what you're looking for — so if the right lot comes across my desk, you're my first call."`,
           },
           {
             type: "tip",
@@ -1737,22 +1767,17 @@ const BUYER_SELLER_SCRIPTS = {
             label: "Closing Line",
             color: "#f59e0b",
             bg: "#1f1500",
-            text: `"This is really helpful, [NAME]. I've got everything I need to start looking. Here's what I'll do — I'll reach out the moment something comes across my desk that fits what you described. In the meantime, let me send you a quick summary of what I'm sourcing so you have my contact info handy. Best email for you?"`,
+            text: `"This was really helpful, [NAME]. I've got everything I need to start looking. Here's what I'll do — I'll reach out the moment something comes across my desk that fits what you described. In the meantime, let me send you a quick summary of what I'm sourcing so you have my contact info handy. Whats the best email for you?"`,
           },
           {
             type: "say",
             label: "Confirm Everything",
             color: "#f59e0b",
             bg: "#1f1500",
-            text: `"And just to confirm — best number to reach you directly is this one? And it's okay if I follow up in a few weeks even if I don't have something specific yet, just to stay on your radar?"`,
+            text: `"And to confirm — the best number to reach you directly is this one? And is it okay if I follow up in a few weeks?"`,
           },
         ],
-        rebuttals: [
-          {
-            them: `"Just reach out when you have something."`,
-            you: `"Will do. I may check in once in a while just to see if your criteria shifted — markets move fast and I want to make sure I'm chasing the right stuff for you. That okay?"`,
-          },
-        ],
+        rebuttals: [],
         comeback: [
           "Buy box zip codes locked in",
           "Lot size range confirmed",
@@ -2030,284 +2055,6 @@ const BUYER_SELLER_SCRIPTS = {
       },
     ],
   },
-};
-
-const ATTORNEY_SCRIPT = {
-  id: "attorney",
-  label: "Script 4",
-  title: "Real Estate Attorney Outreach",
-  goal: "Find a state-licensed real estate attorney to draft your land purchase & sale agreement, assignment of contract, and double close agreement — once per state.",
-  accent: "#e879f9",
-  badge: "LEGAL SIDE",
-  steps: [
-    {
-      id: "gatekeeper",
-      label: "Gatekeeper",
-      icon: "🚪",
-      intro: "Law offices almost always have a receptionist or legal assistant screening calls. Your goal is to get to the attorney directly, or schedule a consultation. You are a potential paying client — carry yourself accordingly.",
-      blocks: [
-        {
-          type: "say",
-          label: "Opening Line",
-          color: "#22c55e",
-          bg: "#0f2a1a",
-          text: `"Hi, my name is [YOUR NAME]. I'm a real estate investor and I'm looking to speak with one of your real estate attorneys about drafting some transaction documents specific to [STATE]. Is there someone I can speak with, or would I need to schedule a consultation?"`,
-        },
-        {
-          type: "tip",
-          label: "Who You're Looking For",
-          color: "#a78bfa",
-          bg: "#1a1030",
-          text: "You want an attorney who specifically handles real estate transactions — not general practice. If the firm does multiple areas of law, ask specifically for their real estate transactional attorney, not a litigator.",
-        },
-      ],
-      rebuttals: [
-        {
-          them: `"What kind of documents are you looking for?"`,
-          you: `"I need a land purchase and sale agreement, an assignment of contract, and a double close agreement — all drafted for [STATE] specifically. I wholesale vacant land and I want to make sure my contracts are legally sound in every state I operate in."`,
-        },
-        {
-          them: `"You'll need to schedule a paid consultation first."`,
-          you: `"Completely understand — I'm happy to do that. What does that look like, and how long is a typical consultation? I want to make sure we cover everything in one sitting."`,
-        },
-        {
-          them: `"We don't handle that type of work."`,
-          you: `"No problem at all — do you happen to know of a firm in [STATE/AREA] that specializes in real estate transactions? I want to make sure I'm working with someone who knows the state-specific requirements."`,
-        },
-        {
-          them: `"Can I take your information?"`,
-          you: `"Of course — [YOUR NAME], [PHONE], [EMAIL]. And could I get the attorney's name and a direct line or email so I can follow up if I don't hear back within a day or two?"`,
-        },
-      ],
-      comeback: [
-        "Attorney's name confirmed",
-        "Direct number or email",
-        "Consultation cost and length",
-        "Confirmation they handle real estate transactions in that state",
-      ],
-    },
-    {
-      id: "opener",
-      label: "Opener",
-      icon: "🎙",
-      intro: "You've reached the attorney directly or been transferred through. Lead with clarity — you know what you need, you're a paying client, and this is a one-time engagement per state with potential for repeat work as you expand.",
-      blocks: [
-        {
-          type: "say",
-          label: "Opening Line",
-          color: "#22c55e",
-          bg: "#0f2a1a",
-          text: `"Hi [ATTORNEY NAME], my name is [YOUR NAME]. I'm a land wholesaler — I buy vacant lots off-market and resell them to builders and developers. I'm actively working deals in [STATE] and I need to make sure I have legally sound contracts specific to your state laws before I close my first transaction here. I'm looking to hire an attorney to draft those documents for me, and I want to do it right the first time."`,
-        },
-        {
-          type: "tip",
-          label: "Why This Framing Works",
-          color: "#a78bfa",
-          bg: "#1a1030",
-          text: "Attorneys respect clients who know what they want and come prepared. You're not asking vague questions — you're telling them exactly what you need and signaling that you're a serious, paying client. Mention future states casually — it signals recurring business.",
-        },
-        {
-          type: "say",
-          label: "Transition",
-          color: "#3b82f6",
-          bg: "#0f1e30",
-          text: `"I have a few questions to make sure you're the right fit — and then I'd like to talk about moving forward. Do you have a few minutes?"`,
-        },
-      ],
-      rebuttals: [
-        {
-          them: `"What exactly is wholesaling?"`,
-          you: `"Sure — I get a vacant lot under contract with the seller, then either assign that contract to my end buyer, or do a double close where I buy and resell on the same day. I need contracts that cover both structures and hold up in [STATE]."`,
-        },
-        {
-          them: `"I'm not familiar with assignment of contract in this context."`,
-          you: `"That's actually one of the reasons I want an attorney involved — I want to make sure the language is airtight for this state. It's a fairly straightforward real estate assignment, but state laws vary and I don't want to assume anything."`,
-        },
-      ],
-      comeback: [],
-    },
-    {
-      id: "questions",
-      label: "Key Questions",
-      icon: "📋",
-      intro: "Before you commit to hiring them, qualify the attorney. Not every real estate attorney handles transactional investor work — some only do closings, litigation, or residential. These questions tell you fast if they're the right fit.",
-      blocks: [],
-      questions: [
-        { q: "Do you handle real estate transactional work for investors specifically, or is your practice focused more on closings and litigation?", why: "You need a transactional attorney, not someone who only handles disputes or title issues." },
-        { q: "Are you licensed and practicing in [STATE]?", why: "Contracts must be drafted by an attorney licensed in the state where the transaction occurs." },
-        { q: "Have you drafted purchase and sale agreements for vacant land transactions before?", why: "Land contracts differ from residential — you want someone with direct experience." },
-        { q: "Are you familiar with assignment of contract structures used in wholesaling?", why: "Some attorneys aren't investor-friendly — better to know now than after you've paid a retainer." },
-        { q: "Have you handled double close or simultaneous closing agreements?", why: "This is the more complex structure — you need to know if they've done it before." },
-        { q: "Are there any legal restrictions in [STATE] that would affect wholesaling, assignments, or double closes I should know about?", why: "Some states have restrictions on contract assignments or require a license — your attorney should know this cold." },
-        { q: "Would you be drafting these from scratch or working from templates you've used before?", why: "From scratch takes longer and costs more — templates they've used before are already tested and cheaper to customize." },
-        { q: "What's your typical turnaround time once I provide the deal details and we agree to move forward?", why: "You may need contracts fast — you need to know their bandwidth." },
-      ],
-      rebuttals: [],
-      comeback: [],
-    },
-    {
-      id: "scope",
-      label: "Scope of Work",
-      icon: "📝",
-      intro: "Once you've confirmed they're the right fit, clearly define the three documents you need. Be specific — vague asks lead to vague deliverables and scope creep on the bill.",
-      blocks: [
-        {
-          type: "say",
-          label: "Define What You Need",
-          color: "#e879f9",
-          bg: "#1a0a1f",
-          text: `"Here's exactly what I'm looking to have drafted. I need three documents, all specific to [STATE] law:\n\nOne — a Vacant Land Purchase and Sale Agreement to use when I'm buying from a seller. It needs to cover purchase price, earnest money, inspection period, closing timeline, contingencies, and an assignability clause.\n\nTwo — an Assignment of Contract agreement so I can assign my buyer position to my end buyer in lieu of a double close when that structure makes more sense.\n\nThree — a Double Close or Back-to-Back Closing agreement that covers both Transaction A and Transaction B — the buy and the resell — and is structured so my profit stays protected.\n\nI want all three to be clean, plain-language, and something I can use repeatedly without having to call an attorney every time I have a deal."`,
-        },
-        {
-          type: "tip",
-          label: "Assignability Clause — Make Sure It's In There",
-          color: "#ef4444",
-          bg: "#2a0f0f",
-          text: `Your Purchase & Sale Agreement MUST include language that makes the contract assignable — something like "and/or assigns" after your name as the buyer. Without this, you can't legally assign the contract to your end buyer. Make sure your attorney knows this is non-negotiable.`,
-        },
-        {
-          type: "tip",
-          label: "Plain Language Matters",
-          color: "#f59e0b",
-          bg: "#1f1500",
-          text: "Ask for plain language — not legalese. You'll be presenting these to land owners who are regular people, not attorneys. A clean, readable contract builds trust and speeds up the signing process.",
-        },
-      ],
-      rebuttals: [
-        {
-          them: `"I'd need to review the details before I can draft anything."`,
-          you: `"Completely understood — I'm not asking you to start today. I just want to confirm the scope so you can give me a quote and we can agree on the engagement. Once we're aligned on cost and timeline, I'll get you everything you need."`,
-        },
-        {
-          them: `"We don't typically draft assignment agreements for wholesalers."`,
-          you: `"I understand that's not always common. To be clear — this isn't an agreement to help me avoid licensing requirements. This is a standard real estate assignment of contract used in a lawful transaction. I'm happy to walk through the specifics if it helps clarify."`,
-        },
-        {
-          them: `"You could probably find templates online."`,
-          you: `"I've seen those — and I'd rather pay for something that's been reviewed by an attorney who knows [STATE] law specifically. Generic templates have gaps, and one bad contract could cost me far more than your fee. I want to do this right."`,
-        },
-      ],
-      comeback: [],
-    },
-    {
-      id: "fees",
-      label: "Fees & Process",
-      icon: "💰",
-      intro: "Get a clear picture of what this engagement will cost and how the process works before you commit.",
-      blocks: [
-        {
-          type: "say",
-          label: "Ask About Fees",
-          color: "#f59e0b",
-          bg: "#1f1500",
-          text: `"Before we go further — can you give me a sense of what drafting these three documents would typically cost? And do you charge a flat fee for this type of work, or is it billed hourly?"`,
-        },
-      ],
-      questions: [
-        { q: "Do you charge a flat fee or hourly for contract drafting?", why: "Flat fee = predictable cost. Hourly = open-ended bill. Always prefer flat fee for defined scope work." },
-        { q: "Is there a separate consultation fee, and does it apply toward the drafting cost if I move forward?", why: "Some attorneys credit the consult fee — others don't. Know before you agree to a paid consult." },
-        { q: "What information do you need from me to get started once we agree to move forward?", why: "Be ready to provide it fast — delays on your end extend the timeline." },
-        { q: "Will I have the opportunity to review and request revisions before the documents are finalized?", why: "You want at least one round of revisions included — don't assume it is." },
-        { q: "Once these are drafted, can I use them for multiple transactions, or do they need to be updated per deal?", why: "You want reusable templates — not something you pay to redraft every closing." },
-        { q: "If I expand into other states down the road, would you be able to adapt these for those states or refer me to someone who can?", why: "Plants the seed for a long-term relationship and recurring business across your expansion markets." },
-      ],
-      rebuttals: [
-        {
-          them: `"Our rates are [HIGH NUMBER] per hour."`,
-          you: `"I appreciate the transparency. Is there any flexibility on a flat fee for a defined scope like this — three documents, one round of revisions? I'd rather agree on a number upfront than have an open invoice."`,
-        },
-        {
-          them: `"I'd need a retainer before we begin."`,
-          you: `"Understood — what does that retainer look like, and how is it applied toward the total cost?"`,
-        },
-        {
-          them: `"This might take a few weeks."`,
-          you: `"I can work with that. Is there anything I can provide upfront to help move it along faster once we agree to engage?"`,
-        },
-      ],
-      comeback: [
-        "Attorney name, direct number, and email confirmed",
-        "Licensed in target state confirmed",
-        "Familiar with assignments and double closes — confirmed",
-        "Flat fee or hourly rate noted",
-        "Retainer requirement noted",
-        "Turnaround timeline noted",
-        "Revision policy confirmed",
-        "Next step agreed upon — consult scheduled or quote incoming",
-      ],
-    },
-    {
-      id: "close",
-      label: "Close the Call",
-      icon: "🤝",
-      intro: "You've qualified them and discussed scope. End the call with a clear next step — either a scheduled consultation or a written quote.",
-      blocks: [
-        {
-          type: "say",
-          label: "If You're Ready to Move Forward",
-          color: "#22c55e",
-          bg: "#0f2a1a",
-          text: `"This sounds like a great fit. Here's what I'd like to do — let's schedule a formal consultation so I can walk you through the exact deal structure I use and you can ask any questions before you start drafting. What does your availability look like this week or next?"`,
-        },
-        {
-          type: "say",
-          label: "If You Need a Quote First",
-          color: "#3b82f6",
-          bg: "#0f1e30",
-          text: `"Before I commit, would you be able to put together a flat fee quote for the three documents based on what we discussed? I want to move quickly but I'd like to see a number in writing first. Can you email that to me at [EMAIL]?"`,
-        },
-        {
-          type: "say",
-          label: "Either Way — Confirm the Relationship",
-          color: "#e879f9",
-          bg: "#1a0a1f",
-          text: `"I'll also say — I plan to expand into additional states as my business grows. If this first engagement goes well, you'd be my first call every time I enter a new market. I'd rather build a long-term relationship with one attorney I trust than shop around every time."`,
-        },
-        {
-          type: "tip",
-          label: "After the Call",
-          color: "#f59e0b",
-          bg: "#1f1500",
-          text: "Send a follow-up email the same day summarizing: your name, your business model in 2 sentences, the three documents you need, the state, and your timeline. This gives them everything in writing and makes it easy for them to quote you accurately.",
-        },
-      ],
-      rebuttals: [
-        {
-          them: `"I'll have my assistant follow up with you."`,
-          you: `"Perfect — just to make sure nothing slips through, can you confirm my email is [EMAIL]? And roughly when should I expect to hear back?"`,
-        },
-        {
-          them: `"We're pretty backed up right now."`,
-          you: `"Understood. Would you be able to give me a realistic timeline so I can plan around it? And if it's going to be more than two weeks, is there someone else at the firm who might be able to start sooner?"`,
-        },
-      ],
-      comeback: [],
-    },
-    {
-      id: "voicemail",
-      label: "Voicemail",
-      icon: "📱",
-      intro: "Law offices screen calls carefully. Leave something that immediately signals you're a paying client with a specific, defined need.",
-      blocks: [
-        {
-          type: "say",
-          label: "Leave This",
-          color: "#22c55e",
-          bg: "#0f2a1a",
-          text: `"Hi, this message is for [ATTORNEY NAME] — my name is [YOUR NAME]. I'm a real estate investor wholesaling vacant land in [STATE] and I'm looking to hire an attorney to draft three transaction documents specific to your state: a purchase and sale agreement, an assignment of contract, and a double close agreement. I'd like to schedule a consultation at your earliest convenience. You can reach me at [PHONE]. Again, [YOUR NAME] at [PHONE]. Thank you."`,
-        },
-        {
-          type: "tip",
-          label: "Voicemail Rules",
-          color: "#a78bfa",
-          bg: "#1a1030",
-          text: "Name the three documents specifically — it proves you know what you need and aren't fishing for free legal advice. Say your number twice. Under 30 seconds.",
-        },
-      ],
-      rebuttals: [],
-      comeback: [],
-    },
-  ],
 };
 
 /* Script 3 — Title Company Outreach (rebuilt from your original chat) */
@@ -2755,12 +2502,181 @@ const TITLE_CONTRACT_SCRIPT = {
   ],
 };
 
+/* ============================================================
+   SCRIPT 6 — Realtor Outreach Caller Script (find builders via agents)
+   ============================================================ */
+const AGENT_BUILDER_SCRIPT = {
+  id: "agentBuilder",
+  label: "Script 6",
+  title: "Realtor Outreach Caller Script",
+  goal: "Get to the builder question within the first 20 seconds. Turn a \"no\" into a relationship.",
+  accent: "#a3e635",
+  accentDim: "#2a3a10",
+  badge: "REALTOR SIDE",
+  badgeColor: "#a3e635",
+  steps: [
+    {
+      id: "opener",
+      label: "Opener",
+      icon: "🎙",
+      intro: "Calling a listing agent. Use the first opener when you're calling about a specific listing, the second when it's cold.",
+      blocks: [
+        {
+          type: "say",
+          label: "Specific Listing",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi, is this [Name]? This is Deivan with Arcadia Land Capital. I'll be quick. I saw your new build listing on [Street]. I buy vacant lots in [County], and I'm looking for builders who need more land. Who built that one, and are they looking for lots?"`,
+        },
+        {
+          type: "say",
+          label: "Cold (No Specific Listing)",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi [Name], Deivan with Arcadia Land Capital. Quick question. I source off-market vacant lots in [County] at below-market prices. Do you work with any builders who are looking for land right now?"`,
+        },
+      ],
+      rebuttals: [],
+      comeback: [],
+    },
+    {
+      id: "knows",
+      label: "They Know Builders",
+      icon: "🏗",
+      intro: "They know a builder. Get the buy box and a way to reach them.",
+      blocks: [
+        {
+          type: "say",
+          label: "Say This",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Great. I'd love to get in front of them. What areas are they building in, and what lot sizes and price range work for them?"`,
+        },
+        {
+          type: "say",
+          label: "Then Ask",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `• "Do they need city water and sewer, or will they do well and septic?"\n• "What's the best way to reach them? Or would you rather pass my info along?"\n• "If they buy a lot from me, I'm happy to take care of you on the deal."`,
+        },
+        {
+          type: "tip",
+          label: "Referral Fees",
+          color: "#a78bfa",
+          bg: "#1a1030",
+          text: "Only offer this to licensed agents, and run any referral payments through your attorney.",
+        },
+      ],
+      rebuttals: [],
+      comeback: [
+        "Builder name and contact",
+        "Areas",
+        "Lot size",
+        "Price range",
+        "Utility requirements",
+        "Whether the agent wants deals sent to them",
+      ],
+    },
+    {
+      id: "pivot",
+      label: "The Pivot",
+      icon: "🔄",
+      intro: "They don't know builders. Pivot so you can still work together.",
+      blocks: [
+        {
+          type: "say",
+          label: "Say This",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"No problem. Let me ask you a couple of quick things, because we could still work together."`,
+        },
+        {
+          type: "say",
+          label: "1. Them as a Buyer",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Do you or any of your investor clients ever pick up lots to build on or hold? I get deals below retail, and I can send them to you first."`,
+        },
+        {
+          type: "say",
+          label: "2. Their Buyer Clients",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Do you get buyers who want to build their own home but can't find land? I can be your land source."`,
+        },
+        {
+          type: "say",
+          label: "3. Seller Leads",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Do you ever get calls from people wanting to sell a small lot that isn't worth your time to list? Send them my way. I make quick cash offers, and I'll make it worth your while."`,
+        },
+        {
+          type: "say",
+          label: "Close",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Can I add you to my list? I'll send deals in [County] as they come in. What's the best email for that?"`,
+        },
+      ],
+      rebuttals: [],
+      comeback: [
+        "Builder name and contact",
+        "Areas",
+        "Lot size",
+        "Price range",
+        "Utility requirements",
+        "Whether the agent wants deals sent to them",
+      ],
+    },
+    {
+      id: "pushback",
+      label: "Common Pushback",
+      icon: "🥊",
+      intro: "Common pushback from agents.",
+      blocks: [],
+      rebuttals: [
+        {
+          them: `"I don't really do land."`,
+          you: `"Totally fair. That's why I'm calling. If a land seller or lot buyer ever comes your way, I'm the person to send them to."`,
+        },
+        {
+          them: `"Are you a wholesaler?"`,
+          you: `"Yes. I put lots under contract below market and connect them with builders. The builder gets cheaper land, and you get a resource for land deals you'd normally pass on."`,
+        },
+        {
+          them: `"Just send me an email."`,
+          you: `"Will do. What areas and price ranges should I keep you in mind for?" (Get at least one answer before you hang up.)`,
+        },
+      ],
+      comeback: [],
+    },
+    {
+      id: "voicemail",
+      label: "Voicemail",
+      icon: "📞",
+      intro: "No answer. Leave this.",
+      blocks: [
+        {
+          type: "say",
+          label: "Voicemail",
+          color: "#22c55e",
+          bg: "#0f2a1a",
+          text: `"Hi [Name], Deivan with Arcadia Land Capital, 727-989-5142. I buy and sell vacant lots in [County] and I'm looking to connect with builders who need land. I saw your listing on [Street] and wanted to see who built it. Call or text me back. Again, 727-989-5142."`,
+        },
+      ],
+      rebuttals: [],
+      comeback: [],
+    },
+  ],
+};
+
 const CALL_SCRIPTS = {
   builder: BUYER_SELLER_SCRIPTS.builder,
   seller: BUYER_SELLER_SCRIPTS.seller,
   title: TITLE_SCRIPT,
-  attorney: { ...ATTORNEY_SCRIPT, accentDim: "#2a0f33", badgeColor: "#e879f9" },
   titleContract: TITLE_CONTRACT_SCRIPT,
+  agentBuilder: AGENT_BUILDER_SCRIPT,
 };
 
 /* ============================================================
@@ -3750,6 +3666,91 @@ function dorLabel(uc) {
   return DOR_LABELS[key] || `Use code ${raw}`;
 }
 
+/* ---- Teardown / lot-clearing cost chart (owner card) ----
+   LOW-END rates published on each company's own site, researched Nov 2026 — a
+   starting point for the price sheet, not a quote. The county roll does NOT say
+   frame vs block for homes (CONST_CLAS is 0 on residential), so Frame/Block is a
+   toggle that defaults by age. Block = frame +20% (low end of the 20–35% block
+   premium Florida Demolition Experts publishes). Priced on living area (footprint
+   isn't on the roll), which slightly overstates 2-story homes. */
+const DEMO_COMPANIES = [
+  { name: "PAW Demolition", phone: "(727) 862-5956", area: "Tampa Bay & Central FL", lat: 28.27, lng: -82.72, frame: 6.0, src: "pawdemo.com — homeowners usually pay $6–$10/sf" },
+  { name: "Demolition Pros", phone: "(850) 564-3366", area: "Pensacola & Panhandle", lat: 30.42, lng: -87.22, frame: 4.0, src: "demolitionpros.com — $4–$10/sf" },
+  { name: "Florida Demolition Experts", phone: "(954) 444-6643", area: "South Florida", lat: 26.12, lng: -80.14, frame: 6.0, src: "floridademolitionexperts.com — $6–$15/sf" },
+];
+const DEMO_BLOCK_PREMIUM = 1.2;
+const CLEAR_COMPANY = { name: "Florida Land Clearing", phone: "(813) 733-6607", area: "Statewide", min: 3000, src: "floridalandclearing.com — from $3,000 per machine day, 1-day minimum" };
+const telHref = (p) => "tel:+1" + String(p).replace(/\D/g, "");
+function milesBetween(lat1, lng1, lat2, lng2) {
+  const R = 3958.8, rad = Math.PI / 180, dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function teardownFor(card, pick) {
+  const uc = String(card.uc || "").replace(/^0+/, "");
+  if (["1", "2", "8"].includes(uc) && card.livAr > 0) {
+    const near = DEMO_COMPANIES.map((c) => ({ c, mi: milesBetween(card.lat, card.lng, c.lat, c.lng) })).sort((a, b) => a.mi - b.mi)[0];
+    const auto = (card.yrBuilt > 0 && card.yrBuilt < 1950) || uc === "2" ? "frame" : "block";
+    const type = pick || auto;
+    const rate = near.c.frame * (type === "block" ? DEMO_BLOCK_PREMIUM : 1);
+    return { kind: "home", type, rate, cost: Math.round((card.livAr * rate) / 100) * 100, co: near.c, mi: Math.round(near.mi), sf: card.livAr, impVal: Math.max(0, card.jv - card.lndVal), mobile: uc === "2" };
+  }
+  if (card.vacant) return { kind: "vacant", co: CLEAR_COMPANY };
+  return null;
+}
+
+/* ---- Zoning / future-land-use lookup (owner card) ----
+   Florida has NO statewide zoning layer — each county publishes its own. These are
+   the county ArcGIS services verified live (point-in-polygon, browser CORS ok,
+   Nov 2026), keyed by the DOR county number on the parcel (CO_NO). "zoning" =
+   actual zoning district; "flu" = comp-plan Future Land Use designation (what the
+   county plans the land for — NOT the same as zoning, labelled as such). Anything
+   not listed shows a "not on the map yet" note + a search link. Legends are the
+   counties' own published labels. */
+const POLK_FLU = { CC: "Convenience Center", NAC: "Neighborhood Activity Center", CAC: "Community Activity Center", TC: "Town Center", RAC: "Regional Activity Center", HIC: "High-Impact Commercial Center", TCC: "Tourism Commercial Center", LCC: "Linear Commercial Corridor", CE: "Commercial Enclave", OC: "Office Center", EC: "Employment Center", "BPC-1": "Business Park Center", "BPC-2": "Business Park Center", IND: "Industrial", PI: "Professional Institutional", PM: "Phosphate Mining", LR: "Leisure / Recreation", "INST-1": "Institutional", "INST-2": "Institutional", ROS: "Recreation Open Space", PRESV: "Preservation", CORE: "CARMP Core", RCC: "Rural Cluster Center (non-residential)", "RCC-R": "Rural Cluster Center (residential)", RS: "Residential Suburban", "RL-1": "Residential Low", "RL-2": "Residential Low", "RL-3": "Residential Low", "RL-4": "Residential Low", RM: "Residential Medium", RH: "Residential High", "A/RR": "Agriculture / Residential Rural", DRI: "Development of Regional Impact", CITY: "Inside a city", LAKES: "Lake" };
+const PASCO_FLU = { AGR: "Agricultural Residential (.1–.29 du/ac)", CC: "Connected City", CEO: "Employment Center", CL: "Coastal Lands", CON: "Conservation", COR: "Commercial, Office, Residential", CPEV: "Central Pasco Employment Village", CSQ: "Community Square (12–17.9 du/ac)", GH: "Gateway HUB", NCR: "Neighborhood Corner (6–11.9 du/ac)", NPC: "New Port Corners", NT: "New Town", ORI: "Research, Office, Industrial Light", PD: "Planned Development", PI: "Planned Industrial", PSP: "Public / Semi-Public", RDR: "Rural Density Residential (.3–2.9 du/ac)", ROS: "Recreation / Open Space", SDR: "Suburban Density Residential", UCR: "Urban Center (18–64 du/ac)", UDR: "Urban Density Residential (18–64 du/ac)", VOPH: "Villages of Pasadena Hills", CITY: "Inside a city" };
+const MARION_FLU = { RL: "Rural Land (1 du / 10 ac)", LR: "Low Residential (0–1 du/ac)", MR: "Medium Residential (1–4 du/ac)", HR: "High Residential (4–8 du/ac)", UR: "Urban Residential (8–16 du/ac)", RAC: "Rural Activity Center", COM: "Commercial", EC: "Employment Center", CD: "Commerce District", P: "Public", PR: "Preservation", M: "Municipality" };
+const zs = (v) => String(v == null ? "" : v).trim();
+const ZONING_SRC = {
+  39: { county: "Hillsborough", kind: "zoning", url: "https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/Zoning/FeatureServer/0",
+    read: (a) => ({ code: zs(a.NZONE), desc: zs(a.NZONE_DESC), extra: zs(a.RZ) ? `Rezoning ${zs(a.RZ)}` : "" }) },
+  63: { county: "Polk", kind: "flu", url: "https://services1.arcgis.com/YMN4aIYxPejzDjo2/arcgis/rest/services/Map_Land_Use_and_Zoning___FLU_2030/FeatureServer/0",
+    read: (a) => ({ code: zs(a.FLUNAME), desc: POLK_FLU[zs(a.FLUNAME)] || "", extra: zs(a.DEV_AREA_DESC), city: zs(a.FLUNAME) === "CITY" }) },
+  61: { county: "Pasco", kind: "flu", url: "https://services6.arcgis.com/Mo4MddfRHpFwT7UF/arcgis/rest/services/FutureLandUse2050/FeatureServer/0",
+    read: (a) => ({ code: zs(a.NEW_FLU), desc: PASCO_FLU[zs(a.NEW_FLU)] || "", extra: zs(a.futureland) && zs(a.futureland) !== zs(a.NEW_FLU) ? zs(a.futureland) : "", city: zs(a.NEW_FLU) === "CITY" }) },
+  52: { county: "Marion", kind: "flu", url: "https://services1.arcgis.com/oMGpBoZpy1Db2sAl/arcgis/rest/services/FutureLandUse/FeatureServer/0",
+    read: (a) => ({ code: zs(a.GS_FLUM), desc: MARION_FLU[zs(a.GS_FLUM)] || "", extra: "", city: zs(a.GS_FLUM) === "M" }) },
+  59: { county: "Osceola", kind: "flu", url: "https://services6.arcgis.com/9zKHLCgIwu2HFA5O/arcgis/rest/services/Future_Land_Use/FeatureServer/12",
+    read: (a) => ({ code: "", desc: zs(a.CA_FLU).toLowerCase().replace(/(^|[\s/])\w/g, (m) => m.toUpperCase()), extra: "", city: /INCORPORATED/i.test(zs(a.CA_FLU)) }) },
+  68: { county: "Sarasota", kind: "flu", url: "https://ags3.scgov.net/server/rest/services/Hosted/FutureLandUse/FeatureServer/0",
+    read: (a) => ({ code: zs(a.flucode), desc: zs(a.weblabel) && zs(a.weblabel) !== zs(a.flucode) ? zs(a.weblabel) : zs(a.fludesignation), extra: zs(a.municipality) && !["SC", "NA"].includes(zs(a.municipality)) ? `Municipality: ${zs(a.municipality)}` : "" }) },
+  67: { county: "Santa Rosa", kind: "zoning", url: "https://services.arcgis.com/Eg4L1xEv2R3abuQd/arcgis/rest/services/Zoning/FeatureServer/0",
+    read: (a) => ({ code: zs(a.DISTRICT), desc: zs(a.Descriptio), extra: "", city: zs(a.DISTRICT) === "CITY" }) },
+  76: { county: "Walton", kind: "flu", url: "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Walton_FutureLandUse/FeatureServer/0",
+    read: (a) => ({ code: zs(a.TYPE), desc: zs(a.CLASS), extra: "", city: zs(a.TYPE) === "MUNI" }) },
+  19: { county: "Citrus", kind: "flu", url: "https://services7.arcgis.com/G6NDVglwRcrz6l7N/arcgis/rest/services/LANDUSE/FeatureServer/0",
+    read: (a) => ({ code: zs(a.LANDUSE), desc: zs(a.DESCRIPT).toLowerCase().replace(/(^|\s)\w/g, (m) => m.toUpperCase()), extra: "" }) },
+  21: { county: "Collier", kind: "zoning", url: "https://services2.arcgis.com/SlIq32SqARUHIhSx/arcgis/rest/services/Zoning_General_(Editable)_view/FeatureServer/1",
+    read: (a) => ({ code: zs(a.ZONING), desc: zs(a.DISTRICT), extra: "" }) },
+};
+const ZONING_NO_BY_NAME = { hillsborough: 39, polk: 63, pasco: 61, marion: 52, osceola: 59, sarasota: 68, "santa rosa": 67, walton: 76, citrus: 19, collier: 21 };
+const zoningSrcFor = (card) => ZONING_SRC[card.coNo] || ZONING_SRC[ZONING_NO_BY_NAME[String(card.county || "").toLowerCase()]] || null;
+async function fetchZoning(card) {
+  const src = zoningSrcFor(card);
+  if (!src) return { status: "na" };
+  const params = new URLSearchParams({ geometry: `${card.lng},${card.lat}`, geometryType: "esriGeometryPoint", inSR: "4326", spatialRel: "esriSpatialRelIntersects", outFields: "*", returnGeometry: "false", f: "json" });
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(`${src.url}/query?${params}`, { signal: ctrl.signal });
+    const j = await r.json();
+    if (j.error) throw new Error("zoning service error");
+    const a = (j.features || [])[0];
+    if (!a) return { status: "none", county: src.county, kind: src.kind };
+    const out = src.read(a.attributes || {});
+    return { status: "done", county: src.county, kind: src.kind, ...out };
+  } finally { clearTimeout(timer); }
+}
+
 // Point-in-polygon (ray cast) for picking the parcel under a geocoded address
 function pointInRing(x, y, ring) {
   let inside = false;
@@ -3772,6 +3773,46 @@ function featureRoughCenter(feat) {
   ring.forEach((pt) => { sx += pt[0]; sy += pt[1]; });
   return [sx / ring.length, sy / ring.length];
 }
+
+/* Lot dimensions from the parcel polygon: smallest rotated rectangle that fits the lot
+   (convex hull + rotating calipers) in feet, plus how well the lot fills it — a low
+   fill means an irregular lot, so the label gets a "~". Cached on the feature. */
+function lotDims(f) {
+  if (f.__dim !== undefined) return f.__dim;
+  f.__dim = null;
+  const g = f && f.geometry; if (!g) return null;
+  const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+  let ring = null, bestA = 0;
+  polys.forEach((p) => { const r = p[0]; if (r && r.length > 3) { let a = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += r[j][0] * r[i][1] - r[i][0] * r[j][1]; a = Math.abs(a); if (a > bestA) { bestA = a; ring = r; } } });
+  if (!ring) return null;
+  const lat0 = ring[0][1], lng0 = ring[0][0], kx = 111320 * Math.cos((lat0 * Math.PI) / 180), ky = 110540;
+  const pts = ring.map(([x, y]) => [(x - lng0) * kx, (y - lat0) * ky]);
+  let area = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) area += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  area = Math.abs(area) / 2;
+  if (!(area > 1)) return null;
+  const s = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  s.forEach((p) => { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); });
+  for (let i = s.length - 1; i >= 0; i--) { const p = s[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  const hull = lo.slice(0, -1).concat(up.slice(0, -1));
+  let best = null;
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+    if (!len) continue;
+    const ux = dx / len, uy = dy / len;
+    let u0 = 1e18, u1 = -1e18, v0 = 1e18, v1 = -1e18;
+    hull.forEach((p) => { const u = p[0] * ux + p[1] * uy, v = -p[0] * uy + p[1] * ux; if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; });
+    const w = u1 - u0, h = v1 - v0;
+    if (!best || w * h < best.w * best.h) best = { w, h };
+  }
+  if (!best) return null;
+  const ft = 3.28084, a = Math.min(best.w, best.h) * ft, b = Math.max(best.w, best.h) * ft;
+  f.__dim = { w: a, d: b, fill: area / (best.w * best.h), acres: area / 4046.86 };
+  return f.__dim;
+}
+const fmtFt = (n) => String(Math.round(n >= 200 ? n / 5 : n) * (n >= 200 ? 5 : 1));
 
 // Does this search look like a specific lot (APN or street address) vs a market?
 function looksLikeLotQuery(s) {
@@ -4043,6 +4084,12 @@ const RADAR_CSS = `
   font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: .04em; transition: border-color .12s; }
 .ms-chip:hover { border-color: ${CC.phosphor}; }
 .ms-scroll { scrollbar-width: thin; scrollbar-color: ${CC.edge} transparent; }
+.ms-me { position: relative; width: 24px; height: 24px; }
+.ms-me i { position: absolute; inset: 0; border-radius: 50%; background: rgba(47,140,255,.4); animation: ms-me-ping 1.8s ease-out infinite; }
+.ms-dimwrap { background: transparent; border: none; pointer-events: none; }
+.ms-dim { transform: translate(-50%, -50%); white-space: nowrap; font: 700 9.5px 'JetBrains Mono', monospace; color: #fff; background: rgba(7,11,10,.62); border-radius: 3px; padding: 1px 4px; text-shadow: 0 0 3px #000; letter-spacing: .02em; }
+.ms-me b { position: absolute; inset: 5px; border-radius: 50%; background: #2f8cff; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 0 14px rgba(47,140,255,.95); }
+@keyframes ms-me-ping { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .ms-hot i { animation: none !important; } }
 `;
 
@@ -4050,6 +4097,20 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const mapEl = React.useRef(null);
   const mapRef = React.useRef(null);
   const refreshLotsRef = React.useRef(() => {});
+  const gpsRef = React.useRef({ watchId: null, follow: false, fixed: false, dot: null, acc: null, lock: null });
+  const [gps, setGps] = useState({ mode: "off" }); // off | locating | follow | free | error
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [layers, setLayers] = useState(() => { try { return JSON.parse(localStorage.getItem("lc_map_layers") || "{}") || {}; } catch (_) { return {}; } });
+  const toggleLayer = (k) => setLayers((s) => { const n = { ...s, [k]: !s[k] }; try { localStorage.setItem("lc_map_layers", JSON.stringify(n)); } catch (_) {} return n; });
+  const [demoPick, setDemoPick] = useState(null);   // null = auto frame/block guess, else "frame" | "block"
+  const [zoning, setZoning] = useState(null);       // zoning / future-land-use lookup for the selected lot
+  const zoningSeq = React.useRef(0);
+  const runZoning = (c) => {
+    const my = ++zoningSeq.current;
+    if (!zoningSrcFor(c)) { setZoning({ status: "na" }); return; }
+    setZoning({ status: "loading" });
+    fetchZoning(c).then((r) => { if (my === zoningSeq.current) setZoning(r); }).catch(() => { if (my === zoningSeq.current) setZoning({ status: "error" }); });
+  };
   const [ready, setReady] = useState(false);
   const [mapErr, setMapErr] = useState("");
   const [tilesDead, setTilesDead] = useState(false);
@@ -4092,8 +4153,13 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         lotLayer: L.layerGroup().addTo(map), scanLayer: L.layerGroup().addTo(map),
         hotLayer: L.layerGroup().addTo(map), histLayer: L.layerGroup().addTo(map),
         findLayer: L.layerGroup().addTo(map), compLayer: L.layerGroup().addTo(map),
+        gpsLayer: L.layerGroup().addTo(map), dimLayer: L.layerGroup().addTo(map),
         lotCtrl: null, lotTimer: null, selLot: null, lotFeats: [] };
       map.on("zoomend", () => setZoom(map.getZoom()));
+      // dragging the map yourself pauses auto-follow (tap the locate button to snap back)
+      map.on("dragstart", () => {
+        if (gpsRef.current.follow) { gpsRef.current.follow = false; setGps((g) => (g.mode === "follow" ? { ...g, mode: "free" } : g)); }
+      });
       map.on("moveend", () => {
         const z = map.getZoom();
         setZoom(z);
@@ -4105,7 +4171,23 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       setReady(true);
       setTimeout(() => map.invalidateSize(), 60);
     }).catch((e) => setMapErr(String((e && e.message) || e)));
-    return () => { dead = true; if (mapRef.current) { mapRef.current.map.remove(); mapRef.current = null; } };
+    return () => {
+      dead = true;
+      try { const g = gpsRef.current; if (g.watchId != null) navigator.geolocation.clearWatch(g.watchId); if (g.lock) g.lock.release(); g.watchId = null; g.lock = null; g.dot = null; g.acc = null; } catch (_) {}
+      if (mapRef.current) { mapRef.current.map.remove(); mapRef.current = null; }
+    };
+  }, []);
+
+  // phone screens sleep and drop the wake lock when the tab is hidden — grab it again on return while tracking
+  useEffect(() => {
+    const h = async () => {
+      const g = gpsRef.current;
+      if (g.watchId != null && document.visibilityState === "visible" && navigator.wakeLock) {
+        try { g.lock = await navigator.wakeLock.request("screen"); } catch (_) {}
+      }
+    };
+    document.addEventListener("visibilitychange", h);
+    return () => document.removeEventListener("visibilitychange", h);
   }, []);
 
   // basemap: dark ops view wide, live satellite at street zoom (auto), or forced
@@ -4130,6 +4212,25 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     m.labels = m.L.tileLayer(labelsUrl, { maxZoom: 19, opacity: effBase === "sat" ? 0.9 : 0.85 });
     m.labels.addTo(m.map);
   }, [ready, effBase]);
+
+  // lot-dimension labels (Layers ▸ Lot dimensions): one small "62′ × 118′" tag per lot,
+  // only for lots big enough on screen to hold it, so zooming in reveals more of them
+  useEffect(() => {
+    const m = mapRef.current; if (!ready || !m) return;
+    m.dimLayer.clearLayers();
+    if (!layers.dims || zoom < 17 || !lots || lots.status !== "done") return;
+    const mpp = (156543.03392 * Math.cos((m.map.getCenter().lat * Math.PI) / 180)) / Math.pow(2, m.map.getZoom()); // meters per pixel
+    let n = 0;
+    for (const f of m.lotFeats || []) {
+      if (n >= 700) break;
+      const d = lotDims(f); if (!d) continue;
+      if (d.w * 0.3048 / mpp < 18 || d.d * 0.3048 / mpp < 46) continue; // too small to label legibly yet
+      const c = featureRoughCenter(f); if (!c) continue;
+      const txt = `${d.fill < 0.88 ? "~" : ""}${fmtFt(d.w)}′×${fmtFt(d.d)}′`;
+      m.dimLayer.addLayer(m.L.marker([c[1], c[0]], { icon: m.L.divIcon({ html: `<div class="ms-dim">${txt}</div>`, className: "ms-dimwrap", iconSize: [0, 0] }), interactive: false, keyboard: false }));
+      n++;
+    }
+  }, [ready, layers.dims, zoom, lots]);
 
   // permit-demand hotspot blips
   useEffect(() => {
@@ -4161,8 +4262,72 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     });
   }, [ready, markets.length]);
 
+  /* ---- live "you are here" (drive-for-dollars) ----
+     Blue pulsing dot + accuracy ring from the device GPS, following you across the
+     lot lines. Only re-centers when the dot nears the screen edge, so lot lines
+     aren't re-pulled every second while you're moving. */
+  const breakFollow = () => {
+    const g = gpsRef.current;
+    if (g.follow) { g.follow = false; setGps((s) => (s.mode === "follow" ? { ...s, mode: "free" } : s)); }
+  };
+
+  const stopGps = () => {
+    const g = gpsRef.current;
+    try { if (g.watchId != null) navigator.geolocation.clearWatch(g.watchId); } catch (_) {}
+    try { if (g.lock) g.lock.release(); } catch (_) {}
+    g.watchId = null; g.lock = null; g.follow = false; g.fixed = false; g.dot = null; g.acc = null;
+    const m = mapRef.current; if (m) m.gpsLayer.clearLayers();
+    setGps({ mode: "off" });
+  };
+
+  const onGpsFix = (pos) => {
+    const m = mapRef.current; if (!m) return;
+    const g = gpsRef.current;
+    const ll = [pos.coords.latitude, pos.coords.longitude];
+    const accuracy = pos.coords.accuracy || 0;
+    if (!g.dot) {
+      g.acc = m.L.circle(ll, { radius: accuracy, color: "#2f8cff", weight: 1, opacity: 0.6, fillColor: "#2f8cff", fillOpacity: 0.1, interactive: false });
+      g.dot = m.L.marker(ll, { icon: m.L.divIcon({ html: '<div class="ms-me"><i></i><b></b></div>', className: "ms-wrap", iconSize: [24, 24] }), interactive: false, keyboard: false, zIndexOffset: 2000 });
+      m.gpsLayer.addLayer(g.acc); m.gpsLayer.addLayer(g.dot);
+    } else {
+      g.dot.setLatLng(ll); g.acc.setLatLng(ll); g.acc.setRadius(accuracy);
+    }
+    if (g.follow) {
+      if (!g.fixed) m.map.setView(ll, Math.max(m.map.getZoom(), 17), { animate: false });
+      else if (!m.map.getBounds().pad(-0.3).contains(ll)) m.map.setView(ll, m.map.getZoom(), { animate: false });
+    }
+    g.fixed = true;
+    const mode = g.follow ? "follow" : "free", acc = Math.round(accuracy);
+    setGps((s) => (s.mode === mode && s.acc === acc ? s : { mode, acc }));
+  };
+
+  const startGps = async () => {
+    if (!mapRef.current) return;
+    if (!navigator.geolocation) { setGps({ mode: "error", msg: "This browser can't read your location." }); return; }
+    const g = gpsRef.current;
+    g.follow = true; g.fixed = false;
+    setGps({ mode: "locating" });
+    g.watchId = navigator.geolocation.watchPosition(onGpsFix, (err) => {
+      if (err && err.code === 1) { stopGps(); setGps({ mode: "error", msg: "Location is blocked — allow it for this site in your browser settings, then tap again." }); }
+      else setGps((s) => (s.mode === "follow" || s.mode === "free" ? s : { mode: "locating" })); // timeout / no fix yet — keep searching
+    }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 });
+    try { if (navigator.wakeLock) g.lock = await navigator.wakeLock.request("screen"); } catch (_) {}
+  };
+
+  const onGpsButton = () => {
+    const g = gpsRef.current;
+    if (gps.mode === "off" || gps.mode === "error") startGps();
+    else if (gps.mode === "free") {
+      g.follow = true;
+      const m = mapRef.current;
+      if (m && g.dot) m.map.setView(g.dot.getLatLng(), Math.max(m.map.getZoom(), 17), { animate: false });
+      setGps((s) => ({ ...s, mode: "follow" }));
+    } else stopGps();
+  };
+
   const focusHotspot = (c) => {
     setSel(c);
+    breakFollow();
     const m = mapRef.current; if (!m) return;
     m.map.flyTo([c.lat, c.lng], Math.max(m.map.getZoom(), 8), { duration: 0.8 });
   };
@@ -4188,6 +4353,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const scanHotspot = (c) => {
     const m = mapRef.current; if (!m) { setScan({ status: "error" }); return; }
     setSel(c);
+    breakFollow();
     m.map.once("moveend", () => runScan(c.lat, c.lng));
     m.map.flyTo([c.lat, c.lng], 13, { duration: 1.1 });
   };
@@ -4202,7 +4368,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     const m = mapRef.current;
     if (m && m.selLot) { try { m.selLot.setStyle(LOT_STYLE); } catch (_) {} m.selLot = null; }
     if (m) { m.findLayer.clearLayers(); m.compLayer.clearLayers(); }
-    setCard(null); setComps(null);
+    setCard(null); setComps(null); zoningSeq.current++; setZoning(null);
   };
 
   const openLotCard = (ft, latlng, lyr) => {
@@ -4222,6 +4388,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       apn: s(p.PARCEL_ID), owner: s(p.OWN_NAME),
       mail1: s(p.OWN_ADDR1), mail2: [s(p.OWN_CITY), s(p.OWN_STATE), s(p.OWN_ZIPCD)].filter(Boolean).join(", "),
       site: [s(p.PHY_ADDR1), s(p.PHY_CITY)].filter(Boolean).join(", "),
+      street: s(p.PHY_ADDR1), city: s(p.PHY_CITY),
       zip: s(p.PHY_ZIPCD) || s(p.OWN_ZIPCD),
       county: nearestFLCounty(latlng.lat, latlng.lng),
       acres, uc: s(p.DOR_UC), ucLabel: dorLabel(p.DOR_UC),
@@ -4229,9 +4396,13 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       jv, lndVal: parseFloat(p.LND_VAL) || 0,
       salePrice: price, saleYr: parseFloat(p.SALE_YR1) || 0, saleMo: s(p.SALE_MO1),
       yrBuilt: parseFloat(p.ACT_YR_BLT) || 0,
+      livAr: parseFloat(p.TOT_LVG_AR) || 0,
+      coNo: parseFloat(p.CO_NO) || 0,
       sent: "",
     };
+    setDemoPick(null);
     setCard(cardObj);
+    runZoning(cardObj);
     runComps(cardObj); // auto-comp the instant the parcel is selected — no button, no wait
     focusDossierOn(cardObj.lat, cardObj.lng); // county dossier follows the selected/searched lot
   };
@@ -4362,6 +4533,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       openLotCard(feat, ctr, null);       // clears findLayer, fills the owner card
       m.findLayer.addLayer(gl);           // then drop the yellow highlight on the lot
       setFinder(null);
+      breakFollow(); // searched a lot on purpose — don't let live-follow yank the map back
       m.map.setView(ctr, Math.max(m.map.getZoom(), 17), { animate: false }); // teleport — flyTo gets cancelled by any user drag mid-flight
     } catch (e) {
       setFinder({ status: "error", msg: String((e && e.message) || e) });
@@ -4444,7 +4616,13 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       price: card.jv > 0 ? String(Math.round(card.jv)) : "",
       address: card.site, mailing: [card.mail1, card.mail2].filter(Boolean).join(", "),
       source: "Market Radar map", lat: card.lat, lng: card.lng, pstate: "FL",
-      notes: `${card.ucLabel || ""}${card.vacant ? " (VACANT)" : ""}.${saleTxt} Pulled live from FL cadastral.`.trim(),
+      notes: `${card.ucLabel || ""}${card.vacant ? " (VACANT)" : ""}.${saleTxt}${zoning && zoning.status === "done" && !zoning.city && (zoning.code || zoning.desc) ? ` ${zoning.kind === "flu" ? "Future land use" : "Zoning"}: ${[zoning.code, zoning.desc].filter(Boolean).join(" — ")}.` : ""}${(() => {
+        const t = teardownFor(card, demoPick);
+        if (!t) return "";
+        return t.kind === "home"
+          ? ` Est. teardown $${t.cost.toLocaleString()} (${t.type}, ${Math.round(t.sf).toLocaleString()} sf @ $${t.rate.toFixed(2)}/sf — ${t.co.name} ${t.co.phone}).`
+          : ` Lot clearing from $${t.co.min.toLocaleString()} (${t.co.name} ${t.co.phone}).`;
+      })()} Pulled live from FL cadastral.`.trim(),
     };
     update({ ...data, leads: [lead, ...(data.leads || [])] });
     setCard({ ...card, sent: "ok" });
@@ -4497,6 +4675,53 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       {/* map + radar overlay */}
       <div style={{ position: "relative" }}>
         <div ref={mapEl} className={"ms-map" + (tilesDead ? " ms-nogrid" : "")} style={{ height: "min(74vh, 820px)", minHeight: 420, zIndex: 0 }} />
+        {ready && !mapErr && (
+          <div style={{ position: "absolute", right: 10, bottom: 154, zIndex: 650 }}>
+            {layersOpen && (
+              <div style={{ position: "absolute", right: 56, bottom: 0, width: "min(236px, calc(100vw - 100px))", background: "rgba(7,11,10,.95)", border: `1px solid ${CC.edgeLit}`, borderRadius: 8, padding: "10px 12px" }}>
+                <div style={{ ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".2em", color: CC.phosphorDim, marginBottom: 8 }}>MAP LAYERS</div>
+                <button type="button" onClick={() => toggleLayer("dims")} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+                  <span style={{ width: 34, height: 18, borderRadius: 99, flexShrink: 0, background: layers.dims ? CC.cyan : CC.edge, position: "relative", transition: "background .15s" }}>
+                    <span style={{ position: "absolute", top: 2, left: layers.dims ? 18 : 2, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .15s" }} />
+                  </span>
+                  <span>
+                    <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: CC.stake }}>Lot dimensions</span>
+                    <span style={{ display: "block", fontSize: 10.5, color: CC.stakeDim, lineHeight: 1.35, marginTop: 1 }}>
+                      {layers.dims && zoom < 17 ? "Zoom in to street level to see them" : "Width × depth on each lot. ~ means irregular shape."}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
+            <button type="button" onClick={() => setLayersOpen((o) => !o)} aria-label="Map layers" title="Map layers"
+              style={{ width: 46, height: 46, borderRadius: 10, cursor: "pointer", fontSize: 21, lineHeight: 1,
+                border: `2px solid ${layersOpen || layers.dims ? CC.cyan : CC.edgeLit}`,
+                background: layersOpen ? "rgba(70,199,242,.18)" : "rgba(7,11,10,.92)", color: layers.dims || layersOpen ? CC.cyan : CC.stake,
+                boxShadow: "0 2px 10px rgba(0,0,0,.5)" }}>◫</button>
+          </div>
+        )}
+        {ready && !mapErr && (
+          <div style={{ position: "absolute", right: 10, bottom: 100, zIndex: 650, display: "flex", alignItems: "center", gap: 8 }}>
+            {gps.mode !== "off" && (
+              <span style={{ ...{ fontFamily: "'JetBrains Mono', monospace" }, fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", padding: "6px 10px", borderRadius: 6, background: "rgba(7,11,10,.9)",
+                border: `1px solid ${gps.mode === "error" ? CC.amber : "#2f8cff"}`, color: gps.mode === "error" ? CC.amber : "#8fc2ff", maxWidth: 260 }}>
+                {gps.mode === "locating" ? "◌ FINDING YOU…"
+                  : gps.mode === "follow" ? `◉ LIVE · ±${gps.acc} M`
+                  : gps.mode === "free" ? "◎ TAP TO RE-CENTER"
+                  : gps.msg}
+              </span>
+            )}
+            <button type="button" onClick={onGpsButton} aria-label="Show my live location"
+              title={gps.mode === "off" || gps.mode === "error" ? "Show my live location" : gps.mode === "free" ? "Re-center on me" : "Stop tracking"}
+              style={{ width: 46, height: 46, borderRadius: 10, cursor: "pointer", fontSize: 22, lineHeight: 1,
+                border: `2px solid ${gps.mode === "off" || gps.mode === "error" ? CC.edgeLit : "#2f8cff"}`,
+                background: gps.mode === "follow" ? "#2f8cff" : "rgba(7,11,10,.92)",
+                color: gps.mode === "follow" ? "#fff" : gps.mode === "off" || gps.mode === "error" ? CC.stake : "#8fc2ff",
+                boxShadow: gps.mode === "follow" ? "0 0 14px rgba(47,140,255,.8)" : "0 2px 10px rgba(0,0,0,.5)" }}>
+              {gps.mode === "follow" ? "◉" : "◎"}
+            </button>
+          </div>
+        )}
         {mapErr && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: CC.abyss, zIndex: 600 }}>
             <div style={{ ...mono, fontSize: 12, color: CC.amber, textAlign: "center", padding: 20 }}>⚠ Live map unavailable ({mapErr}).<br />Hotspot rankings and dossiers below still run on real permit data.</div>
@@ -4560,6 +4785,70 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
               )}
               {card.jv > 0 && <div style={{ fontSize: 12, color: CC.stakeDim }}>County just value ${Math.round(card.jv).toLocaleString()}{card.lndVal > 0 && card.lndVal !== card.jv ? ` · land $${Math.round(card.lndVal).toLocaleString()}` : ""}</div>}
             </div>
+            {zoning && (() => {
+              const lab = { ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".18em", color: CC.phosphorDim };
+              const note = { fontSize: 10.5, color: CC.stakeDim, marginTop: 3, lineHeight: 1.4 };
+              const find = (q) => <a href={g(q)} target="_blank" rel="noreferrer" style={{ color: CC.cyan, textDecoration: "none", fontWeight: 700 }}>Find it ↗</a>;
+              const z = zoning;
+              const title = z.kind === "flu" && !z.city && z.status !== "none" ? "FUTURE LAND USE" : "ZONING";
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${CC.edge}` }}>
+                  {z.status === "loading" && <><span style={lab}>ZONING</span><div style={{ ...note, marginTop: 5 }}>checking county map…</div></>}
+                  {z.status === "na" && <><span style={lab}>ZONING</span><div style={{ ...note, marginTop: 5 }}>Not on the map yet for {card.county} Co. · {find(`${card.county} County FL zoning map`)}</div></>}
+                  {z.status === "error" && <><span style={lab}>ZONING</span><div style={{ ...note, marginTop: 5 }}>County map didn't answer · {find(`${card.county} County FL zoning map`)}</div></>}
+                  {z.status === "none" && <><span style={lab}>{title} · {z.county.toUpperCase()} CO.</span><div style={{ ...note, marginTop: 5 }}>Nothing at this spot — likely inside a city{card.city ? ` (${card.city})` : ""} · {find(`${card.city || card.county} FL zoning map`)}</div></>}
+                  {z.status === "done" && z.city && <><span style={lab}>{title} · {z.county.toUpperCase()} CO.</span><div style={{ fontSize: 13, color: CC.stake, marginTop: 5 }}>Inside city limits{card.city ? ` — ${card.city}` : ""}</div><div style={note}>The city sets the zoning · {find(`${card.city || card.county} FL zoning map`)}</div></>}
+                  {z.status === "done" && !z.city && (
+                    <>
+                      <span style={lab}>{title} · {z.county.toUpperCase()} CO.</span>
+                      <div style={{ marginTop: 5, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                        {z.code && <span style={{ ...mono, fontSize: 18, fontWeight: 800, color: CC.cyan }}>{z.code}</span>}
+                        <span style={{ fontSize: 12.5, color: CC.stake }}>{z.desc || (z.code ? "" : "—")}</span>
+                      </div>
+                      {z.extra && <div style={note}>{z.extra}</div>}
+                      {z.kind === "flu" && <div style={note}>The county's plan for this land — the zoning district can be more specific. Confirm with the county.</div>}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+            {(() => {
+              const t = teardownFor(card, demoPick);
+              if (!t) return null;
+              const lab ={ ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".18em", color: CC.phosphorDim };
+              const call = <a href={telHref(t.co.phone)} style={{ color: CC.cyan, textDecoration: "none", fontWeight: 700 }}>☎ {t.co.phone}</a>;
+              const seg = (v) => (
+                <button type="button" key={v} onClick={() => setDemoPick(v)}
+                  style={{ ...mono, fontSize: 9.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", cursor: "pointer", padding: "3px 9px",
+                    border: `1px solid ${t.type === v ? CC.amber : CC.edge}`, background: t.type === v ? "rgba(245,181,68,.14)" : "transparent", color: t.type === v ? CC.amber : CC.stakeDim,
+                    borderRadius: v === "frame" ? "4px 0 0 4px" : "0 4px 4px 0" }}>{v}</button>
+              );
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${CC.edge}` }}>
+                  {t.kind === "home" ? (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={lab}>TEARDOWN · EST.</span>
+                        <span style={{ display: "flex" }}>{seg("frame")}{seg("block")}</span>
+                      </div>
+                      <div style={{ ...mono, fontSize: 22, fontWeight: 800, color: CC.amber, marginTop: 5, lineHeight: 1.1 }}>${t.cost.toLocaleString()}</div>
+                      <div style={{ fontSize: 11.5, color: CC.stake, marginTop: 3 }}>{Math.round(t.sf).toLocaleString()} sf · ${t.rate.toFixed(2)}/sf{t.impVal > 0 && <span style={{ color: CC.stakeDim }}> · home value ${Math.round(t.impVal).toLocaleString()}</span>}</div>
+                      {t.mobile && <div style={{ fontSize: 10.5, color: CC.stakeDim, marginTop: 2 }}>Mobile home — priced at the frame rate.</div>}
+                    </>
+                  ) : (
+                    <>
+                      <span style={lab}>LOT CLEARING · EST.</span>
+                      <div style={{ ...mono, fontSize: 22, fontWeight: 800, color: CC.amber, marginTop: 5, lineHeight: 1.1 }}>from ${t.co.min.toLocaleString()}</div>
+                      <div style={{ fontSize: 11.5, color: CC.stake, marginTop: 3 }}>brush &amp; trees · 1 machine-day minimum</div>
+                    </>
+                  )}
+                  <div style={{ fontSize: 12, color: CC.stake, marginTop: 7 }}>{t.co.name} &nbsp; {call}</div>
+                  <div style={{ fontSize: 10.5, color: CC.stakeDim, marginTop: 2, lineHeight: 1.4 }}>
+                    {t.co.area} · lowest published rate — call to confirm scope &amp; price{t.mi > 120 ? ` · nearest on file is ~${t.mi} mi away` : ""}
+                  </div>
+                </div>
+              );
+            })()}
             <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
               <button type="button" onClick={() => runComps()} style={btnStyle(CC.cyan, false)}>
                 {!comps ? "⚖ Comp this lot"
@@ -4575,6 +4864,27 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
                 <a href={g(`${card.apn} ${card.county} County FL property appraiser`)} target="_blank" rel="noreferrer" style={{ ...btnStyle(CC.amber, false), flex: 1, textAlign: "center", textDecoration: "none" }}>Appraiser ↗</a>
               </div>
             </div>
+            {(() => {
+              const L = listingLinksForLot(card);
+              if (!L.exact.length && !L.nearby.length) return null;
+              const chip = { ...mono, fontSize: 10, fontWeight: 700, letterSpacing: ".04em", color: CC.cyan, border: `1px solid ${CC.edgeLit}`, borderRadius: 3, padding: "4px 8px", textDecoration: "none", whiteSpace: "nowrap" };
+              const label = { ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".18em", color: CC.phosphorDim, margin: "0 0 5px" };
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${CC.edge}` }}>
+                  <div style={label}>LISTED? · CHECK THIS LOT</div>
+                  {!L.hasAddr && <div style={{ fontSize: 10.5, color: CC.stakeDim, margin: "0 0 5px", lineHeight: 1.4 }}>No site address on the county roll — searching by APN. Land listings often say "0 [road]" or "Lot X"; check the nearby search too.</div>}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {L.exact.map((l) => <a key={l.name} href={l.url} target="_blank" rel="noreferrer" style={chip}>{l.name} ↗</a>)}
+                  </div>
+                  {L.nearby.length > 0 && <>
+                    <div style={{ ...label, marginTop: 9 }}>LAND FOR SALE NEAR {card.zip}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                      {L.nearby.map((l) => <a key={l.name} href={l.url} target="_blank" rel="noreferrer" style={{ ...chip, color: CC.stakeDim }}>{l.name} ↗</a>)}
+                    </div>
+                  </>}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
