@@ -1251,7 +1251,7 @@ export default function LandCommand() {
         setBackupMsg("That doesn't look like a Land Command backup — paste the full text starting with { and ending with }.");
         return;
       }
-      const restored = { buyboxes: parsed.buyboxes || [], leads: parsed.leads || [], settings: parsed.settings || {}, delinq: parsed.delinq || {} };
+      const restored = { buyboxes: parsed.buyboxes || [], leads: parsed.leads || [], settings: parsed.settings || {}, delinq: parsed.delinq || {}, taxSales: parsed.taxSales || {} };
       update(restored);
       setRestoreText("");
       setBackupMsg(`Restored ✓ — ${restored.buyboxes.length} buy box(es), ${restored.leads.length} lead(s)`);
@@ -1299,7 +1299,7 @@ export default function LandCommand() {
         {!loaded ? <div style={{ color: C.faint, fontSize: 14 }}>Loading your saved buy boxes and leads…</div> : (
           <>
             {tab === "home" && (
-              <CommandCenterTab data={data} onNavigate={setTab} storageOk={storageOk} onOpenBackup={() => setBackupOpen(true)} />
+              <CommandCenterTab data={data} update={update} onNavigate={setTab} storageOk={storageOk} onOpenBackup={() => setBackupOpen(true)} />
             )}
             {storageOk === false && !backupOpen && tab !== "home" && (
               <div style={{ background: C.amberPale, border: `1px solid ${C.amber}`, borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.ink, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -2357,13 +2357,136 @@ function nextActions(leads) {
   return rows.sort((a, b) => b.urgency - a.urgency).slice(0, 6);
 }
 
-function CommandCenterTab({ data, onNavigate, storageOk, onOpenBackup }) {
+/* ---- Tax-sale clock (Command page) ----
+   Works with NO API key: always shows the statutory Florida tax-certificate sale
+   (held on or before June 1 each year, FL Stat. 197.432 — county dates vary), lets
+   you log any county's tax-deed / certificate sale date (saved + backed up in
+   data.taxSales), and optionally auto-fills dates through the Delinquency Hub's AI
+   research. County auction calendars (RealTaxDeed etc.) block automated lookups, so
+   each county links to a search for its clerk's calendar instead of guessing URLs. */
+const FL_COUNTIES = ["Alachua","Baker","Bay","Bradford","Brevard","Broward","Calhoun","Charlotte","Citrus","Clay","Collier","Columbia","DeSoto","Dixie","Duval","Escambia","Flagler","Franklin","Gadsden","Gilchrist","Glades","Gulf","Hamilton","Hardee","Hendry","Hernando","Highlands","Hillsborough","Holmes","Indian River","Jackson","Jefferson","Lafayette","Lake","Lee","Leon","Levy","Liberty","Madison","Manatee","Marion","Martin","Miami-Dade","Monroe","Nassau","Okaloosa","Okeechobee","Orange","Osceola","Palm Beach","Pasco","Pinellas","Polk","Putnam","St. Johns","St. Lucie","Santa Rosa","Sarasota","Seminole","Sumter","Suwannee","Taylor","Union","Volusia","Wakulla","Walton","Washington"];
+const isoToDate = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
+const daysUntil = (d) => { const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d - t) / 864e5); };
+const fmtSaleDate = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+function TaxSaleClock({ data, update, onNavigate }) {
+  const [adding, setAdding] = useState(false);
+  const [fCounty, setFCounty] = useState("Hillsborough");
+  const [fDate, setFDate] = useState("");
+  const [fType, setFType] = useState("tax deed");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const sales = data.taxSales || {};
+  const delinq = data.delinq || {};
+  const rows = [];
+  Object.entries(sales).forEach(([key, r]) => { const d = isoToDate(r.date); if (d) rows.push({ key, county: r.county, state: r.state || "FL", type: r.type, d, manual: true }); });
+  Object.entries(delinq).forEach(([key, r]) => {
+    if (!r || !r.nextSaleDate || /not announced|unknown|^n\/?a/i.test(r.nextSaleDate)) return;
+    const t = Date.parse(r.nextSaleDate); const d = isNaN(t) ? null : new Date(t);
+    if (!d || rows.some((x) => x.county === r.county && x.state === (r.state || "FL") && x.manual)) return;
+    rows.push({ key, county: r.county, state: r.state || "", type: r.saleType && r.saleType !== "unknown" ? r.saleType : "", d: new Date(d.getFullYear(), d.getMonth(), d.getDate()), ai: true });
+  });
+  const upcoming = rows.map((r) => ({ ...r, days: daysUntil(r.d) })).filter((r) => r.days >= -1).sort((a, b) => a.days - b.days);
+
+  const now = new Date(); let cert = new Date(now.getFullYear(), 5, 1);
+  if (daysUntil(cert) < 0) cert = new Date(now.getFullYear() + 1, 5, 1);
+  const certDays = daysUntil(cert);
+
+  const save = () => {
+    if (!fDate) { setMsg("Pick the sale date."); return; }
+    const key = `${fCounty.toLowerCase()}|fl|${fType}`;
+    update({ ...data, taxSales: { ...sales, [key]: { county: fCounty, state: "FL", type: fType, date: fDate } } });
+    setAdding(false); setFDate(""); setMsg("");
+  };
+  const remove = (key) => { const next = { ...sales }; delete next[key]; update({ ...data, taxSales: next }); };
+
+  const armed = [...new Map((data.buyboxes || []).flatMap((b) => splitList(b.counties).map((c) => ({ county: c, state: b.state || "FL" }))).map((c) => [delinqKey(c.county, c.state), c])).values()];
+  const autoFind = async () => {
+    const todo = armed.filter((c) => !(delinq[delinqKey(c.county, c.state)] || {}).nextSaleDate);
+    if (!armed.length) { setMsg("Add a Buy Box with counties first — then I can look up their sale dates."); return; }
+    if (!todo.length) { setMsg("Every county in your Buy Boxes already has a sale date."); return; }
+    setBusy(true); setMsg("");
+    let acc = { ...delinq };
+    try {
+      for (const c of todo) {
+        const r = await researchCounty(c.county, c.state, getAiKey(data));
+        r.researchedAt = new Date().toISOString().slice(0, 10);
+        acc = { ...acc, [delinqKey(c.county, c.state)]: r };
+        update({ ...data, delinq: acc });
+      }
+    } catch (e) {
+      setMsg(e && e.needsBilling ? "Your key works but your Anthropic account has no credit — add billing at console.anthropic.com."
+        : e && e.needsKey ? "Auto-find needs your Claude API key (⚙ AI key in Market Scout). You can still add dates by hand with “+ Add sale”."
+        : "Lookup failed — try again in a few seconds.");
+    } finally { setBusy(false); }
+  };
+
+  const g = (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  const link = { color: CC.cyan, textDecoration: "none", fontWeight: 700, fontSize: 11.5 };
+  const field = { background: "rgba(255,255,255,.06)", border: `1px solid ${CC.edge}`, color: CC.stake, borderRadius: 6, padding: "7px 9px", fontSize: 13, minWidth: 0 };
+  const urgent = (d) => d <= 7 ? CC.amber : d <= 30 ? CC.phosphor : CC.stake;
+
+  return (
+    <div className="cc-card">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div className="cc-eyebrow" style={{ color: CC.amber }}>⚑ Tax-sale clock</div>
+        <button type="button" onClick={() => { setAdding(!adding); setMsg(""); }} style={{ ...link, background: "none", border: "none", cursor: "pointer" }}>{adding ? "✕ Cancel" : "+ Add sale"}</button>
+      </div>
+
+      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        <div className="cc-actionrow">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: CC.stake }}>Florida tax-certificate sales</div>
+            <div style={{ fontSize: 11.5, color: CC.stakeDim }}>All counties · on or before {fmtSaleDate(cert)} · county dates vary</div>
+          </div>
+          <span className="lc-mono" style={{ fontSize: 13, fontWeight: 700, color: urgent(certDays), whiteSpace: "nowrap" }}>{certDays}d</span>
+        </div>
+
+        {upcoming.map((r) => (
+          <div key={r.key} className="cc-actionrow">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: CC.stake }}>{r.county} County{r.state ? `, ${r.state}` : ""}</div>
+              <div style={{ fontSize: 11.5, color: CC.amber }}>{r.type ? r.type + " · " : ""}{fmtSaleDate(r.d)}{r.ai ? " · AI-found, verify" : ""}</div>
+              <div style={{ display: "flex", gap: 12, marginTop: 3 }}>
+                <a href={g(`${r.county} County ${r.state || "Florida"} clerk tax deed sale calendar upcoming`)} target="_blank" rel="noreferrer" style={link}>↗ Calendar</a>
+                <a href={g(`${r.county} County ${r.state || "Florida"} tax collector delinquent tax list`)} target="_blank" rel="noreferrer" style={link}>↗ Delinquent list</a>
+              </div>
+            </div>
+            <span className="lc-mono" style={{ fontSize: 13, fontWeight: 700, color: urgent(r.days), whiteSpace: "nowrap" }}>{r.days <= 0 ? "today" : r.days + "d"}</span>
+            {r.manual && <button type="button" aria-label="Remove sale" onClick={() => remove(r.key)} style={{ background: "none", border: "none", color: CC.stakeDim, cursor: "pointer", fontSize: 14 }}>✕</button>}
+          </div>
+        ))}
+        {upcoming.length === 0 && <div style={{ fontSize: 12.5, color: CC.stakeDim }}>No county sale dates logged yet. Tap “+ Add sale” after checking a county's calendar, or use Auto-find below.</div>}
+      </div>
+
+      {adding && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: `1px solid ${CC.edge}` }}>
+          <select value={fCounty} onChange={(e) => setFCounty(e.target.value)} style={{ ...field, flex: "1 1 130px" }}>{FL_COUNTIES.map((c) => <option key={c} value={c} style={{ color: "#000" }}>{c}</option>)}</select>
+          <select value={fType} onChange={(e) => setFType(e.target.value)} style={{ ...field, flex: "1 1 120px" }}><option value="tax deed" style={{ color: "#000" }}>Tax deed</option><option value="tax certificate" style={{ color: "#000" }}>Tax certificate</option></select>
+          <input type="date" value={fDate} onChange={(e) => setFDate(e.target.value)} style={{ ...field, flex: "1 1 140px", colorScheme: "dark" }} />
+          <button type="button" className="cc-launch" style={{ width: "auto", flexDirection: "row", padding: "7px 14px" }} onClick={save}><span style={{ color: CC.phosphor, fontWeight: 700, fontSize: 13 }}>Save</span></button>
+          <div style={{ flexBasis: "100%", display: "flex", gap: 12 }}>
+            <a href={g(`${fCounty} County Florida clerk tax deed sale calendar upcoming`)} target="_blank" rel="noreferrer" style={link}>↗ Find {fCounty}'s sale calendar</a>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
+        <button type="button" className="cc-launch" disabled={busy} style={{ width: "auto", flexDirection: "row", padding: "7px 14px" }} onClick={autoFind}><span style={{ color: CC.amber, fontWeight: 700, fontSize: 13 }}>{busy ? "Looking up…" : "✦ Auto-find dates"}</span></button>
+        <button type="button" onClick={() => onNavigate("delinq")} style={{ ...link, background: "none", border: "none", cursor: "pointer" }}>Open Liens hub →</button>
+      </div>
+      {msg && <div style={{ fontSize: 12, color: CC.amber, marginTop: 8, lineHeight: 1.4 }}>{msg}</div>}
+    </div>
+  );
+}
+
+function CommandCenterTab({ data, update, onNavigate, storageOk, onOpenBackup }) {
   const leads = data.leads || [], boxes = data.buyboxes || [];
   const matched = useMemo(() => leads.map(l => ({ l, m: bestMatch(l, boxes) })).filter(x => x.m), [leads, boxes]);
   const hot = matched.filter(x => x.m.locMatch && x.m.score >= 70).sort((a, b) => b.m.score - a.m.score);
   const actions = useMemo(() => nextActions(leads), [leads]);
   const delinq = data.delinq || {};
-  const hotCounties = Object.values(delinq).filter(r => r && r.nextSaleDate && !/not announced|unknown/i.test(r.nextSaleDate));
 
   const funnel = ["New", "Contacted", "Negotiating", "Under contract", "Closed"].map(st => ({
     st, n: leads.filter(l => l.status === st).length,
@@ -2518,22 +2641,8 @@ function CommandCenterTab({ data, onNavigate, storageOk, onOpenBackup }) {
           </div>
         </div>
 
-        {/* Hot counties / tax sale clock */}
-        <div className="cc-card">
-          <div className="cc-eyebrow" style={{ color: CC.amber }}>⚑ Tax-sale clock</div>
-          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-            {hotCounties.length === 0 && <div style={{ fontSize: 13, color: CC.stakeDim }}>Research counties in the Delinquency Hub and upcoming tax-sale dates appear here — your sharpest outreach windows.</div>}
-            {hotCounties.slice(0, 5).map((r, i) => (
-              <div key={i} className="cc-actionrow">
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: CC.stake }}>{r.county} County{r.state ? `, ${r.state}` : ""}</div>
-                  <div style={{ fontSize: 11.5, color: CC.amber }}>{r.saleType !== "unknown" ? r.saleType + " · " : ""}{r.nextSaleDate}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-          {hotCounties.length > 0 && <button className="cc-launch" style={{ marginTop: 12, width: "auto", flexDirection: "row" }} onClick={() => onNavigate("delinq")}><span style={{ color: CC.amber, fontWeight: 700, fontSize: 13 }}>Open Delinquency Hub →</span></button>}
-        </div>
+        {/* Tax-sale clock */}
+        <TaxSaleClock data={data} update={update} onNavigate={onNavigate} />
       </div>
 
       {/* Quick launch grid */}
