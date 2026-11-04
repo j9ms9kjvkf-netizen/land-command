@@ -3699,6 +3699,58 @@ function teardownFor(card, pick) {
   return null;
 }
 
+/* ---- Zoning / future-land-use lookup (owner card) ----
+   Florida has NO statewide zoning layer — each county publishes its own. These are
+   the county ArcGIS services verified live (point-in-polygon, browser CORS ok,
+   Nov 2026), keyed by the DOR county number on the parcel (CO_NO). "zoning" =
+   actual zoning district; "flu" = comp-plan Future Land Use designation (what the
+   county plans the land for — NOT the same as zoning, labelled as such). Anything
+   not listed shows a "not on the map yet" note + a search link. Legends are the
+   counties' own published labels. */
+const POLK_FLU = { CC: "Convenience Center", NAC: "Neighborhood Activity Center", CAC: "Community Activity Center", TC: "Town Center", RAC: "Regional Activity Center", HIC: "High-Impact Commercial Center", TCC: "Tourism Commercial Center", LCC: "Linear Commercial Corridor", CE: "Commercial Enclave", OC: "Office Center", EC: "Employment Center", "BPC-1": "Business Park Center", "BPC-2": "Business Park Center", IND: "Industrial", PI: "Professional Institutional", PM: "Phosphate Mining", LR: "Leisure / Recreation", "INST-1": "Institutional", "INST-2": "Institutional", ROS: "Recreation Open Space", PRESV: "Preservation", CORE: "CARMP Core", RCC: "Rural Cluster Center (non-residential)", "RCC-R": "Rural Cluster Center (residential)", RS: "Residential Suburban", "RL-1": "Residential Low", "RL-2": "Residential Low", "RL-3": "Residential Low", "RL-4": "Residential Low", RM: "Residential Medium", RH: "Residential High", "A/RR": "Agriculture / Residential Rural", DRI: "Development of Regional Impact", CITY: "Inside a city", LAKES: "Lake" };
+const PASCO_FLU = { AGR: "Agricultural Residential (.1–.29 du/ac)", CC: "Connected City", CEO: "Employment Center", CL: "Coastal Lands", CON: "Conservation", COR: "Commercial, Office, Residential", CPEV: "Central Pasco Employment Village", CSQ: "Community Square (12–17.9 du/ac)", GH: "Gateway HUB", NCR: "Neighborhood Corner (6–11.9 du/ac)", NPC: "New Port Corners", NT: "New Town", ORI: "Research, Office, Industrial Light", PD: "Planned Development", PI: "Planned Industrial", PSP: "Public / Semi-Public", RDR: "Rural Density Residential (.3–2.9 du/ac)", ROS: "Recreation / Open Space", SDR: "Suburban Density Residential", UCR: "Urban Center (18–64 du/ac)", UDR: "Urban Density Residential (18–64 du/ac)", VOPH: "Villages of Pasadena Hills", CITY: "Inside a city" };
+const MARION_FLU = { RL: "Rural Land (1 du / 10 ac)", LR: "Low Residential (0–1 du/ac)", MR: "Medium Residential (1–4 du/ac)", HR: "High Residential (4–8 du/ac)", UR: "Urban Residential (8–16 du/ac)", RAC: "Rural Activity Center", COM: "Commercial", EC: "Employment Center", CD: "Commerce District", P: "Public", PR: "Preservation", M: "Municipality" };
+const zs = (v) => String(v == null ? "" : v).trim();
+const ZONING_SRC = {
+  39: { county: "Hillsborough", kind: "zoning", url: "https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/Zoning/FeatureServer/0",
+    read: (a) => ({ code: zs(a.NZONE), desc: zs(a.NZONE_DESC), extra: zs(a.RZ) ? `Rezoning ${zs(a.RZ)}` : "" }) },
+  63: { county: "Polk", kind: "flu", url: "https://services1.arcgis.com/YMN4aIYxPejzDjo2/arcgis/rest/services/Map_Land_Use_and_Zoning___FLU_2030/FeatureServer/0",
+    read: (a) => ({ code: zs(a.FLUNAME), desc: POLK_FLU[zs(a.FLUNAME)] || "", extra: zs(a.DEV_AREA_DESC), city: zs(a.FLUNAME) === "CITY" }) },
+  61: { county: "Pasco", kind: "flu", url: "https://services6.arcgis.com/Mo4MddfRHpFwT7UF/arcgis/rest/services/FutureLandUse2050/FeatureServer/0",
+    read: (a) => ({ code: zs(a.NEW_FLU), desc: PASCO_FLU[zs(a.NEW_FLU)] || "", extra: zs(a.futureland) && zs(a.futureland) !== zs(a.NEW_FLU) ? zs(a.futureland) : "", city: zs(a.NEW_FLU) === "CITY" }) },
+  52: { county: "Marion", kind: "flu", url: "https://services1.arcgis.com/oMGpBoZpy1Db2sAl/arcgis/rest/services/FutureLandUse/FeatureServer/0",
+    read: (a) => ({ code: zs(a.GS_FLUM), desc: MARION_FLU[zs(a.GS_FLUM)] || "", extra: "", city: zs(a.GS_FLUM) === "M" }) },
+  59: { county: "Osceola", kind: "flu", url: "https://services6.arcgis.com/9zKHLCgIwu2HFA5O/arcgis/rest/services/Future_Land_Use/FeatureServer/12",
+    read: (a) => ({ code: "", desc: zs(a.CA_FLU).toLowerCase().replace(/(^|[\s/])\w/g, (m) => m.toUpperCase()), extra: "", city: /INCORPORATED/i.test(zs(a.CA_FLU)) }) },
+  68: { county: "Sarasota", kind: "flu", url: "https://ags3.scgov.net/server/rest/services/Hosted/FutureLandUse/FeatureServer/0",
+    read: (a) => ({ code: zs(a.flucode), desc: zs(a.weblabel) && zs(a.weblabel) !== zs(a.flucode) ? zs(a.weblabel) : zs(a.fludesignation), extra: zs(a.municipality) && !["SC", "NA"].includes(zs(a.municipality)) ? `Municipality: ${zs(a.municipality)}` : "" }) },
+  67: { county: "Santa Rosa", kind: "zoning", url: "https://services.arcgis.com/Eg4L1xEv2R3abuQd/arcgis/rest/services/Zoning/FeatureServer/0",
+    read: (a) => ({ code: zs(a.DISTRICT), desc: zs(a.Descriptio), extra: "", city: zs(a.DISTRICT) === "CITY" }) },
+  76: { county: "Walton", kind: "flu", url: "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Walton_FutureLandUse/FeatureServer/0",
+    read: (a) => ({ code: zs(a.TYPE), desc: zs(a.CLASS), extra: "", city: zs(a.TYPE) === "MUNI" }) },
+  19: { county: "Citrus", kind: "flu", url: "https://services7.arcgis.com/G6NDVglwRcrz6l7N/arcgis/rest/services/LANDUSE/FeatureServer/0",
+    read: (a) => ({ code: zs(a.LANDUSE), desc: zs(a.DESCRIPT).toLowerCase().replace(/(^|\s)\w/g, (m) => m.toUpperCase()), extra: "" }) },
+  21: { county: "Collier", kind: "zoning", url: "https://services2.arcgis.com/SlIq32SqARUHIhSx/arcgis/rest/services/Zoning_General_(Editable)_view/FeatureServer/1",
+    read: (a) => ({ code: zs(a.ZONING), desc: zs(a.DISTRICT), extra: "" }) },
+};
+const ZONING_NO_BY_NAME = { hillsborough: 39, polk: 63, pasco: 61, marion: 52, osceola: 59, sarasota: 68, "santa rosa": 67, walton: 76, citrus: 19, collier: 21 };
+const zoningSrcFor = (card) => ZONING_SRC[card.coNo] || ZONING_SRC[ZONING_NO_BY_NAME[String(card.county || "").toLowerCase()]] || null;
+async function fetchZoning(card) {
+  const src = zoningSrcFor(card);
+  if (!src) return { status: "na" };
+  const params = new URLSearchParams({ geometry: `${card.lng},${card.lat}`, geometryType: "esriGeometryPoint", inSR: "4326", spatialRel: "esriSpatialRelIntersects", outFields: "*", returnGeometry: "false", f: "json" });
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(`${src.url}/query?${params}`, { signal: ctrl.signal });
+    const j = await r.json();
+    if (j.error) throw new Error("zoning service error");
+    const a = (j.features || [])[0];
+    if (!a) return { status: "none", county: src.county, kind: src.kind };
+    const out = src.read(a.attributes || {});
+    return { status: "done", county: src.county, kind: src.kind, ...out };
+  } finally { clearTimeout(timer); }
+}
+
 // Point-in-polygon (ray cast) for picking the parcel under a geocoded address
 function pointInRing(x, y, ring) {
   let inside = false;
@@ -4006,6 +4058,14 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const gpsRef = React.useRef({ watchId: null, follow: false, fixed: false, dot: null, acc: null, lock: null });
   const [gps, setGps] = useState({ mode: "off" }); // off | locating | follow | free | error
   const [demoPick, setDemoPick] = useState(null);   // null = auto frame/block guess, else "frame" | "block"
+  const [zoning, setZoning] = useState(null);       // zoning / future-land-use lookup for the selected lot
+  const zoningSeq = React.useRef(0);
+  const runZoning = (c) => {
+    const my = ++zoningSeq.current;
+    if (!zoningSrcFor(c)) { setZoning({ status: "na" }); return; }
+    setZoning({ status: "loading" });
+    fetchZoning(c).then((r) => { if (my === zoningSeq.current) setZoning(r); }).catch(() => { if (my === zoningSeq.current) setZoning({ status: "error" }); });
+  };
   const [ready, setReady] = useState(false);
   const [mapErr, setMapErr] = useState("");
   const [tilesDead, setTilesDead] = useState(false);
@@ -4244,7 +4304,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     const m = mapRef.current;
     if (m && m.selLot) { try { m.selLot.setStyle(LOT_STYLE); } catch (_) {} m.selLot = null; }
     if (m) { m.findLayer.clearLayers(); m.compLayer.clearLayers(); }
-    setCard(null); setComps(null);
+    setCard(null); setComps(null); zoningSeq.current++; setZoning(null);
   };
 
   const openLotCard = (ft, latlng, lyr) => {
@@ -4273,10 +4333,12 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       salePrice: price, saleYr: parseFloat(p.SALE_YR1) || 0, saleMo: s(p.SALE_MO1),
       yrBuilt: parseFloat(p.ACT_YR_BLT) || 0,
       livAr: parseFloat(p.TOT_LVG_AR) || 0,
+      coNo: parseFloat(p.CO_NO) || 0,
       sent: "",
     };
     setDemoPick(null);
     setCard(cardObj);
+    runZoning(cardObj);
     runComps(cardObj); // auto-comp the instant the parcel is selected — no button, no wait
     focusDossierOn(cardObj.lat, cardObj.lng); // county dossier follows the selected/searched lot
   };
@@ -4490,7 +4552,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       price: card.jv > 0 ? String(Math.round(card.jv)) : "",
       address: card.site, mailing: [card.mail1, card.mail2].filter(Boolean).join(", "),
       source: "Market Radar map", lat: card.lat, lng: card.lng, pstate: "FL",
-      notes: `${card.ucLabel || ""}${card.vacant ? " (VACANT)" : ""}.${saleTxt}${(() => {
+      notes: `${card.ucLabel || ""}${card.vacant ? " (VACANT)" : ""}.${saleTxt}${zoning && zoning.status === "done" && !zoning.city && (zoning.code || zoning.desc) ? ` ${zoning.kind === "flu" ? "Future land use" : "Zoning"}: ${[zoning.code, zoning.desc].filter(Boolean).join(" — ")}.` : ""}${(() => {
         const t = teardownFor(card, demoPick);
         if (!t) return "";
         return t.kind === "home"
@@ -4634,10 +4696,37 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
               )}
               {card.jv > 0 && <div style={{ fontSize: 12, color: CC.stakeDim }}>County just value ${Math.round(card.jv).toLocaleString()}{card.lndVal > 0 && card.lndVal !== card.jv ? ` · land $${Math.round(card.lndVal).toLocaleString()}` : ""}</div>}
             </div>
+            {zoning && (() => {
+              const lab = { ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".18em", color: CC.phosphorDim };
+              const note = { fontSize: 10.5, color: CC.stakeDim, marginTop: 3, lineHeight: 1.4 };
+              const find = (q) => <a href={g(q)} target="_blank" rel="noreferrer" style={{ color: CC.cyan, textDecoration: "none", fontWeight: 700 }}>Find it ↗</a>;
+              const z = zoning;
+              const title = z.kind === "flu" && !z.city && z.status !== "none" ? "FUTURE LAND USE" : "ZONING";
+              return (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${CC.edge}` }}>
+                  {z.status === "loading" && <><span style={lab}>ZONING</span><div style={{ ...note, marginTop: 5 }}>checking county map…</div></>}
+                  {z.status === "na" && <><span style={lab}>ZONING</span><div style={{ ...note, marginTop: 5 }}>Not on the map yet for {card.county} Co. · {find(`${card.county} County FL zoning map`)}</div></>}
+                  {z.status === "error" && <><span style={lab}>ZONING</span><div style={{ ...note, marginTop: 5 }}>County map didn't answer · {find(`${card.county} County FL zoning map`)}</div></>}
+                  {z.status === "none" && <><span style={lab}>{title} · {z.county.toUpperCase()} CO.</span><div style={{ ...note, marginTop: 5 }}>Nothing at this spot — likely inside a city{card.city ? ` (${card.city})` : ""} · {find(`${card.city || card.county} FL zoning map`)}</div></>}
+                  {z.status === "done" && z.city && <><span style={lab}>{title} · {z.county.toUpperCase()} CO.</span><div style={{ fontSize: 13, color: CC.stake, marginTop: 5 }}>Inside city limits{card.city ? ` — ${card.city}` : ""}</div><div style={note}>The city sets the zoning · {find(`${card.city || card.county} FL zoning map`)}</div></>}
+                  {z.status === "done" && !z.city && (
+                    <>
+                      <span style={lab}>{title} · {z.county.toUpperCase()} CO.</span>
+                      <div style={{ marginTop: 5, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                        {z.code && <span style={{ ...mono, fontSize: 18, fontWeight: 800, color: CC.cyan }}>{z.code}</span>}
+                        <span style={{ fontSize: 12.5, color: CC.stake }}>{z.desc || (z.code ? "" : "—")}</span>
+                      </div>
+                      {z.extra && <div style={note}>{z.extra}</div>}
+                      {z.kind === "flu" && <div style={note}>The county's plan for this land — the zoning district can be more specific. Confirm with the county.</div>}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
             {(() => {
               const t = teardownFor(card, demoPick);
               if (!t) return null;
-              const lab = { ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".18em", color: CC.phosphorDim };
+              const lab ={ ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".18em", color: CC.phosphorDim };
               const call = <a href={telHref(t.co.phone)} style={{ color: CC.cyan, textDecoration: "none", fontWeight: 700 }}>☎ {t.co.phone}</a>;
               const seg = (v) => (
                 <button type="button" key={v} onClick={() => setDemoPick(v)}
