@@ -1521,7 +1521,7 @@ function PricingTab({ data, update }) {
 
   return (
     <div>
-      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Pricing</div>
+      <div className="lc-display" style={{ fontSize: 22, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>Offer Price to Seller</div>
       <div style={{ fontSize: 13, color: C.faint, marginBottom: 14 }}>Type what it's worth. See what to offer. That's the whole tool.</div>
 
       {/* HERO — the one number that matters, with the offer range it produces */}
