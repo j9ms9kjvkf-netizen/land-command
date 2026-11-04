@@ -3774,6 +3774,46 @@ function featureRoughCenter(feat) {
   return [sx / ring.length, sy / ring.length];
 }
 
+/* Lot dimensions from the parcel polygon: smallest rotated rectangle that fits the lot
+   (convex hull + rotating calipers) in feet, plus how well the lot fills it — a low
+   fill means an irregular lot, so the label gets a "~". Cached on the feature. */
+function lotDims(f) {
+  if (f.__dim !== undefined) return f.__dim;
+  f.__dim = null;
+  const g = f && f.geometry; if (!g) return null;
+  const polys = g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+  let ring = null, bestA = 0;
+  polys.forEach((p) => { const r = p[0]; if (r && r.length > 3) { let a = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += r[j][0] * r[i][1] - r[i][0] * r[j][1]; a = Math.abs(a); if (a > bestA) { bestA = a; ring = r; } } });
+  if (!ring) return null;
+  const lat0 = ring[0][1], lng0 = ring[0][0], kx = 111320 * Math.cos((lat0 * Math.PI) / 180), ky = 110540;
+  const pts = ring.map(([x, y]) => [(x - lng0) * kx, (y - lat0) * ky]);
+  let area = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) area += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  area = Math.abs(area) / 2;
+  if (!(area > 1)) return null;
+  const s = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  s.forEach((p) => { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); });
+  for (let i = s.length - 1; i >= 0; i--) { const p = s[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  const hull = lo.slice(0, -1).concat(up.slice(0, -1));
+  let best = null;
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+    if (!len) continue;
+    const ux = dx / len, uy = dy / len;
+    let u0 = 1e18, u1 = -1e18, v0 = 1e18, v1 = -1e18;
+    hull.forEach((p) => { const u = p[0] * ux + p[1] * uy, v = -p[0] * uy + p[1] * ux; if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; });
+    const w = u1 - u0, h = v1 - v0;
+    if (!best || w * h < best.w * best.h) best = { w, h };
+  }
+  if (!best) return null;
+  const ft = 3.28084, a = Math.min(best.w, best.h) * ft, b = Math.max(best.w, best.h) * ft;
+  f.__dim = { w: a, d: b, fill: area / (best.w * best.h), acres: area / 4046.86 };
+  return f.__dim;
+}
+const fmtFt = (n) => String(Math.round(n >= 200 ? n / 5 : n) * (n >= 200 ? 5 : 1));
+
 // Does this search look like a specific lot (APN or street address) vs a market?
 function looksLikeLotQuery(s) {
   const t = String(s || "").trim();
@@ -4046,6 +4086,8 @@ const RADAR_CSS = `
 .ms-scroll { scrollbar-width: thin; scrollbar-color: ${CC.edge} transparent; }
 .ms-me { position: relative; width: 24px; height: 24px; }
 .ms-me i { position: absolute; inset: 0; border-radius: 50%; background: rgba(47,140,255,.4); animation: ms-me-ping 1.8s ease-out infinite; }
+.ms-dimwrap { background: transparent; border: none; pointer-events: none; }
+.ms-dim { transform: translate(-50%, -50%); white-space: nowrap; font: 700 9.5px 'JetBrains Mono', monospace; color: #fff; background: rgba(7,11,10,.62); border-radius: 3px; padding: 1px 4px; text-shadow: 0 0 3px #000; letter-spacing: .02em; }
 .ms-me b { position: absolute; inset: 5px; border-radius: 50%; background: #2f8cff; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 0 14px rgba(47,140,255,.95); }
 @keyframes ms-me-ping { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .ms-hot i { animation: none !important; } }
@@ -4057,6 +4099,9 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
   const refreshLotsRef = React.useRef(() => {});
   const gpsRef = React.useRef({ watchId: null, follow: false, fixed: false, dot: null, acc: null, lock: null });
   const [gps, setGps] = useState({ mode: "off" }); // off | locating | follow | free | error
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [layers, setLayers] = useState(() => { try { return JSON.parse(localStorage.getItem("lc_map_layers") || "{}") || {}; } catch (_) { return {}; } });
+  const toggleLayer = (k) => setLayers((s) => { const n = { ...s, [k]: !s[k] }; try { localStorage.setItem("lc_map_layers", JSON.stringify(n)); } catch (_) {} return n; });
   const [demoPick, setDemoPick] = useState(null);   // null = auto frame/block guess, else "frame" | "block"
   const [zoning, setZoning] = useState(null);       // zoning / future-land-use lookup for the selected lot
   const zoningSeq = React.useRef(0);
@@ -4108,7 +4153,7 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
         lotLayer: L.layerGroup().addTo(map), scanLayer: L.layerGroup().addTo(map),
         hotLayer: L.layerGroup().addTo(map), histLayer: L.layerGroup().addTo(map),
         findLayer: L.layerGroup().addTo(map), compLayer: L.layerGroup().addTo(map),
-        gpsLayer: L.layerGroup().addTo(map),
+        gpsLayer: L.layerGroup().addTo(map), dimLayer: L.layerGroup().addTo(map),
         lotCtrl: null, lotTimer: null, selLot: null, lotFeats: [] };
       map.on("zoomend", () => setZoom(map.getZoom()));
       // dragging the map yourself pauses auto-follow (tap the locate button to snap back)
@@ -4167,6 +4212,25 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
     m.labels = m.L.tileLayer(labelsUrl, { maxZoom: 19, opacity: effBase === "sat" ? 0.9 : 0.85 });
     m.labels.addTo(m.map);
   }, [ready, effBase]);
+
+  // lot-dimension labels (Layers ▸ Lot dimensions): one small "62′ × 118′" tag per lot,
+  // only for lots big enough on screen to hold it, so zooming in reveals more of them
+  useEffect(() => {
+    const m = mapRef.current; if (!ready || !m) return;
+    m.dimLayer.clearLayers();
+    if (!layers.dims || zoom < 17 || !lots || lots.status !== "done") return;
+    const mpp = (156543.03392 * Math.cos((m.map.getCenter().lat * Math.PI) / 180)) / Math.pow(2, m.map.getZoom()); // meters per pixel
+    let n = 0;
+    for (const f of m.lotFeats || []) {
+      if (n >= 700) break;
+      const d = lotDims(f); if (!d) continue;
+      if (d.w * 0.3048 / mpp < 18 || d.d * 0.3048 / mpp < 46) continue; // too small to label legibly yet
+      const c = featureRoughCenter(f); if (!c) continue;
+      const txt = `${d.fill < 0.88 ? "~" : ""}${fmtFt(d.w)}′×${fmtFt(d.d)}′`;
+      m.dimLayer.addLayer(m.L.marker([c[1], c[0]], { icon: m.L.divIcon({ html: `<div class="ms-dim">${txt}</div>`, className: "ms-dimwrap", iconSize: [0, 0] }), interactive: false, keyboard: false }));
+      n++;
+    }
+  }, [ready, layers.dims, zoom, lots]);
 
   // permit-demand hotspot blips
   useEffect(() => {
@@ -4611,6 +4675,31 @@ function RadarMap({ history, activeMarket, onSelect, onScout, onCreateBox, data,
       {/* map + radar overlay */}
       <div style={{ position: "relative" }}>
         <div ref={mapEl} className={"ms-map" + (tilesDead ? " ms-nogrid" : "")} style={{ height: "min(74vh, 820px)", minHeight: 420, zIndex: 0 }} />
+        {ready && !mapErr && (
+          <div style={{ position: "absolute", right: 10, bottom: 154, zIndex: 650 }}>
+            {layersOpen && (
+              <div style={{ position: "absolute", right: 56, bottom: 0, width: "min(236px, calc(100vw - 100px))", background: "rgba(7,11,10,.95)", border: `1px solid ${CC.edgeLit}`, borderRadius: 8, padding: "10px 12px" }}>
+                <div style={{ ...mono, fontSize: 9, fontWeight: 700, letterSpacing: ".2em", color: CC.phosphorDim, marginBottom: 8 }}>MAP LAYERS</div>
+                <button type="button" onClick={() => toggleLayer("dims")} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+                  <span style={{ width: 34, height: 18, borderRadius: 99, flexShrink: 0, background: layers.dims ? CC.cyan : CC.edge, position: "relative", transition: "background .15s" }}>
+                    <span style={{ position: "absolute", top: 2, left: layers.dims ? 18 : 2, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .15s" }} />
+                  </span>
+                  <span>
+                    <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: CC.stake }}>Lot dimensions</span>
+                    <span style={{ display: "block", fontSize: 10.5, color: CC.stakeDim, lineHeight: 1.35, marginTop: 1 }}>
+                      {layers.dims && zoom < 17 ? "Zoom in to street level to see them" : "Width × depth on each lot. ~ means irregular shape."}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
+            <button type="button" onClick={() => setLayersOpen((o) => !o)} aria-label="Map layers" title="Map layers"
+              style={{ width: 46, height: 46, borderRadius: 10, cursor: "pointer", fontSize: 21, lineHeight: 1,
+                border: `2px solid ${layersOpen || layers.dims ? CC.cyan : CC.edgeLit}`,
+                background: layersOpen ? "rgba(70,199,242,.18)" : "rgba(7,11,10,.92)", color: layers.dims || layersOpen ? CC.cyan : CC.stake,
+                boxShadow: "0 2px 10px rgba(0,0,0,.5)" }}>◫</button>
+          </div>
+        )}
         {ready && !mapErr && (
           <div style={{ position: "absolute", right: 10, bottom: 100, zIndex: 650, display: "flex", alignItems: "center", gap: 8 }}>
             {gps.mode !== "off" && (
